@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自動測試</title>
+<style>
+body{margin:0;padding:16px;background:#0E1416;color:#EEF3F2;font:14px/1.6 system-ui,"Microsoft JhengHei",sans-serif}
+pre{white-space:pre-wrap;word-break:break-all}
+</style>
+</head>
+<body>
+<h1>盲人尋道系統｜自動測試</h1>
+<p>加上 <code>?model=1</code> 會再用真實模型跑公車照片（需要網路下載執行環境）。</p>
+<pre id="out"></pre>
+<script type="module">
+import { run } from "./tests.js";
+const out = document.getElementById("out");
+const log = line => { out.textContent += line + "\n"; };
+const params = new URLSearchParams(location.search);
+// ?report=1：把結果回傳給測試伺服器（自動化測試用）
+const report = () => params.has("report") && fetch("/__log", { method: "POST", body: out.textContent }).catch(() => {});
+run(log, params.has("model")).then(failed => { document.title = failed ? `FAILED ${failed}` : "ALL PASSED"; report(); },
+  e => { log("ERROR " + (e.stack || e)); report(); });
+</script>
+</body>
+</html>

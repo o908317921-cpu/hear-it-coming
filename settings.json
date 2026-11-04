@@ -1,0 +1,44 @@
+{
+  "_說明": "這裡可以覆寫 webapp/js/config.js 裡任何一個大寫設定，不必改程式。以底線開頭的欄位是註解。目前的值與預設值相同，改數字後重新啟動即可生效。",
+
+  "_距離": "物體佔畫面多少比例算偏近（橙）／過近（紅）；這是行人的門檻，其他類別會依 PROXIMITY_CLASS_SCALE 放大",
+  "PROXIMITY_ORANGE_RATIO": 0.10,
+  "PROXIMITY_RED_RATIO": 0.25,
+
+  "_鏡頭": "鏡頭離地高度（公分，胸前背帶約 120）與焦距（像素，用 tools/calibrate_camera.py 校正後填入）",
+  "CAMERA_HEIGHT_CM": 120.0,
+  "CAMERA_FOCAL_LENGTH_PX": 700.0,
+
+  "_速度": "靠近速度（面積變化率 %/秒）與橫向速度（每秒移動幾個物體高度）的快速門檻",
+  "GROWTH_RUN_MIN_PCT_S": 60.0,
+  "LATERAL_FAST_RATE": 3.0,
+
+  "_碰撞": "預測幾秒內會撞上算危險（念「危險」）、幾秒內念「停」；使用者行走路徑佔畫面寬度的比例",
+  "TTC_DANGER_SEC": 3.0,
+  "TTC_URGENT_SEC": 1.8,
+  "COLLISION_ZONE_RATIO": 0.35,
+
+  "_靜態障礙": "深度圖偵測頭部高度障礙（樹枝、招牌）與柱子。STATIC_NEAR_RATIO：逆深度比地面基準大幾倍才警示（越大越晚響，請實地校準）；STATIC_ALERT_DISTANCE_M：回報距離的上限，不決定何時警示",
+  "STATIC_NEAR_RATIO": 1.12,
+  "DEPTH_ENABLED": true,
+  "STATIC_ALERT_DISTANCE_M": 2.0,
+
+  "_晃動補償": "auto＝有陀螺儀用陀螺儀、沒有用背景比對；gyro／flow 只用一種；none 不補償（固定鏡頭）",
+  "CAMERA_MOTION_MODE": "auto",
+
+  "_提醒": "持續危險時多久重複一次語音；語速（1 為正常速度）；畫面平均亮度低於多少提醒光線不足；每秒幾幀以下提醒偵測太慢",
+  "ALARM_VOICE_REPEAT_SEC": 5.0,
+  "SPEECH_RATE": 1.1,
+  "LOW_LIGHT_MEAN": 45.0,
+  "MIN_SAFE_FPS": 3.0,
+
+  "_警示音": "倒車雷達模式：幾公尺內變急促、幾公尺內變長音；網站版沒有警報時是否每隔幾秒一聲輕音（確認系統還在運作）",
+  "BEEP_NEAR_M": 2.0,
+  "BEEP_CLOSE_M": 1.0,
+  "STATUS_TONE_ENABLED": true,
+  "STATUS_TONE_SEC": 10.0,
+
+  "_效能": "有 WebGPU 的瀏覽器用顯示晶片加速（遇到相容問題設為 false）；分析迴圈最快每秒幾幀",
+  "USE_WEBGPU": true,
+  "MAX_FPS": 15
+}

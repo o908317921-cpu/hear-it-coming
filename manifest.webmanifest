@@ -1,0 +1,19 @@
+{
+  "name": "盲人尋道系統",
+  "short_name": "盲人尋道",
+  "lang": "zh-Hant-TW",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E1416",
+  "theme_color": "#0E1416",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

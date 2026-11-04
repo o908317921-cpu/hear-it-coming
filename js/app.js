@@ -439,7 +439,7 @@ async function processFrame(now, id) {
     + `${detector.lastDetectMs.toFixed(0)} ms · ${depthStatus()}` + (motion ? ` · 晃動補償：${motion}` : "");
 }
 
-// ---------- 載入模型（第一次約 12 MB，之後從瀏覽器快取讀取）----------
+// ---------- 載入模型（第一次約 20～35 MB，之後從瀏覽器快取讀取）----------
 let yoloLoading = null;
 async function loadModels(id) {
   if (yolo) return;
@@ -451,7 +451,7 @@ async function loadYolo(id) {
   HazardDetector = modules[0].HazardDetector;
   YoloSegmenter = modules[1].YoloSegmenter;
   setConn("wait", "下載辨識模型…");
-  setBanner("idle", "下載辨識模型…（第一次約 33 MB，建議連 Wi-Fi）");
+  setBanner("idle", "下載辨識模型…（第一次約 20～35 MB，建議連 Wi-Fi）");
   // 第一次下載可能要一兩分鐘，看不到進度條的人要用聽的才知道還在動
   let percent = null;
   const tick = setInterval(() => {
@@ -519,7 +519,8 @@ function announceReady() {
   const steps = ["準備好了，開始偵測。"];
   if (frontCamera) steps.push("目前用的是前鏡頭，請改用有後鏡頭的手機。");
   if (!navigator.wakeLock) steps.push("這支手機可能會自動鎖定螢幕，螢幕一關偵測就會停止，請把自動鎖定關閉。");
-  if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) steps.push("這支手機算得比較慢，警報可能較晚，頭上的障礙不會提醒。");
+  // 新的 iPhone 也走這條路，速度不一定慢：只說真正的差別。真的太慢時，警報規則會另外說「偵測變慢」
+  if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) steps.push("這支手機不會提醒頭上的障礙。");
   else if (depth && !depthReadyTold) steps.push("頭上障礙的偵測還在載入，行人和車輛已經可以偵測。");
   audio.speakSteps(steps);
   $("sceneBtn").focus();
@@ -593,7 +594,7 @@ $("startBtn").onclick = async () => {
     if (id !== runId) return;           // 載入模型時已經按了停止
     // 只有 WASM 的手機每秒僅約 4 幀（報告實驗四），運算要留給碰撞偵測
     if (C.DEPTH_ENABLED && !depth && (yolo.backend !== "wasm" || C.DEPTH_ON_WASM)) { depth = new DepthWorker(); depth.start(); }
-    if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) $("notice").textContent = "這支手機沒有顯示晶片加速，偵測會比較慢，頭部高度障礙不會提醒。";
+    if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) $("notice").textContent = "這支手機不偵測頭部高度障礙，只提醒行人、車輛與路上的障礙物。";
     detector = detector || new HazardDetector(yolo, depth);
     detector.reset();
     engine = new AlertEngine();
@@ -762,4 +763,6 @@ $("voiceBtn").onclick = () => {
     $("startError").textContent = "這個網址不是 https，手機瀏覽器不會允許使用鏡頭。請改用 https 網址開啟（見 README）。";
   }
   $("pageUrl").textContent = location.href;
+  // iPhone 與沒有 WebGPU 的手機不跑深度模型：開始畫面不能說會提醒頭上的障礙
+  if (isIOS || !navigator.gpu) $("featureOverhead").hidden = true;
 })();

@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-08T16:00:00Z",
+  "title": "Design System: 盲人尋道系統",
+  "extensions": {
+    "colorMeta": {
+      "bg": { "role": "neutral", "displayName": "近黑", "canonical": "#0F1113", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "surface": { "role": "neutral", "displayName": "深灰面", "canonical": "#171A1D", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "surface-2": { "role": "neutral", "displayName": "次深灰面", "canonical": "#1F2327", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "line": { "role": "neutral", "displayName": "細線灰", "canonical": "#2B3035", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "track": { "role": "neutral", "displayName": "軌道灰", "canonical": "#262B30", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#262B30", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "text": { "role": "neutral", "displayName": "主文字", "canonical": "#ECEEF0", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "text-2": { "role": "neutral", "displayName": "次文字", "canonical": "#C5CBD1", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "muted": { "role": "neutral", "displayName": "弱化文字", "canonical": "#98A1A9", "tonalRamp": ["#0F1113", "#171A1D", "#1F2327", "#2B3035", "#4A5158", "#98A1A9", "#C5CBD1", "#ECEEF0"] },
+      "primary": { "role": "primary", "displayName": "沉穩藍", "canonical": "#2D6CD2", "tonalRamp": ["#0E2142", "#173A73", "#255BB3", "#2D6CD2", "#5A8DE0", "#8DB4F2", "#BDD3F7", "#E6EFFC"] },
+      "primary-strong": { "role": "primary", "displayName": "深沉穩藍", "canonical": "#255BB3", "tonalRamp": ["#0E2142", "#173A73", "#255BB3", "#2D6CD2", "#5A8DE0", "#8DB4F2", "#BDD3F7", "#E6EFFC"] },
+      "focus": { "role": "primary", "displayName": "淡藍焦點", "canonical": "#8DB4F2", "tonalRamp": ["#0E2142", "#173A73", "#255BB3", "#2D6CD2", "#5A8DE0", "#8DB4F2", "#BDD3F7", "#E6EFFC"] },
+      "on-primary": { "role": "neutral", "displayName": "白字", "canonical": "#FFFFFF" },
+      "green": { "role": "status", "displayName": "安全綠", "canonical": "#3CC850", "tonalRamp": ["#0D2E12", "#165C20", "#24923A", "#3CC850", "#63D673", "#8BE39A", "#BDEFC5", "#E6F9E9"] },
+      "orange": { "role": "status", "displayName": "提醒橘", "canonical": "#FF8C00", "tonalRamp": ["#3A2000", "#6E3D00", "#B36200", "#FF8C00", "#FFA640", "#FFC37A", "#FFDDB3", "#FFF2E3"] },
+      "red": { "role": "status", "displayName": "危險紅", "canonical": "#E53935", "tonalRamp": ["#3A0E0D", "#6E1A18", "#A92724", "#E53935", "#EE6E68", "#FFB4A8", "#FFD6CF", "#FFF0ED"] },
+      "static": { "role": "status", "displayName": "靜態障礙紫", "canonical": "#9C5CD6", "tonalRamp": ["#22123A", "#3F2266", "#6A3BA1", "#9C5CD6", "#B385E1", "#CBADEB", "#E2D3F4", "#F4EEFB"] },
+      "green-text": { "role": "status", "displayName": "淡綠文字", "canonical": "#8BE39A" },
+      "orange-text": { "role": "status", "displayName": "淡橘文字", "canonical": "#FFC37A" },
+      "red-text": { "role": "status", "displayName": "淡紅文字", "canonical": "#FFB4A8" },
+      "green-wash": { "role": "status", "displayName": "淡綠底", "canonical": "rgba(60,200,80,.1)" },
+      "orange-wash": { "role": "status", "displayName": "淡橘底", "canonical": "rgba(255,140,0,.12)" },
+      "red-wash": { "role": "status", "displayName": "淡紅底", "canonical": "rgba(229,57,53,.12)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "只給「開始偵測」大按鈕。" },
+      "headline": { "displayName": "Headline", "purpose": "「目前狀況」主按鈕。" },
+      "title": { "displayName": "Title", "purpose": "狀態橫幅；品牌名稱同字級（字距 .02em）。" },
+      "value": { "displayName": "Value", "purpose": "儀表數值，狀態色，19.2px 粗體屬大字。" },
+      "control": { "displayName": "Control", "purpose": "中性按鈕、條列標題、QR 標題（1–1.05rem）。" },
+      "body": { "displayName": "Body", "purpose": "開場說明。" },
+      "body-sm": { "displayName": "Body small", "purpose": "功能條列內文。" },
+      "label": { "displayName": "Label", "purpose": "狀態膠囊、儀表標題、副標。" },
+      "caption": { "displayName": "Caption", "purpose": "儀表細節、統計、限制聲明（.78–.8rem）。" }
+    },
+    "shadows": [
+      { "name": "line-double", "value": "inset 0 0 0 1px var(--red)", "purpose": "失去保護橫幅的第二條紅線（雙線框），不是投影。" },
+      { "name": "outline-primary", "value": "inset 0 0 0 2px var(--primary)", "purpose": "警報時主按鈕退成描邊。" },
+      { "name": "focus-ring", "value": "outline: 3px solid var(--focus); outline-offset: 3px", "purpose": "所有按鈕的鍵盤焦點。" }
+    ],
+    "motion": [
+      { "name": "press", "value": "background-color .15s", "purpose": "開始偵測按下轉深藍。" },
+      { "name": "state-swap", "value": ".2s (background-color, color, border-color, box-shadow)", "purpose": "橫幅狀態與主按鈕描邊切換。" },
+      { "name": "gauge-fill", "value": ".3s ease (width, background-color)", "purpose": "儀表條填充。" },
+      { "name": "alarm-pulse", "value": "1s ease-in-out infinite; 50% { filter: brightness(1.15) }", "purpose": "只用在實心紅色警報橫幅。" },
+      { "name": "reduced-motion", "value": "transition:none; animation:none", "purpose": "prefers-reduced-motion 下全部關閉。" }
+    ],
+    "breakpoints": [
+      { "name": "desktop-pointer", "value": "(hover:hover) and (pointer:fine)" },
+      { "name": "landscape-wide", "value": "(orientation:landscape) and (min-width:700px)" }
+    ]
+  },
+  "components": [
+    {
+      "name": "主要按鈕（開始偵測）",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "開始畫面唯一的實心藍色塊，最小高度 36vh。",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">開始偵測</button>",
+      "css": ".ds-btn-primary { width: 100%; min-height: 200px; border: 0; border-radius: var(--radius, 12px); background: var(--primary, #2D6CD2); color: #fff; font: inherit; font-size: 2.2rem; font-weight: 700; letter-spacing: .06em; cursor: pointer; transition: background-color .15s; } .ds-btn-primary:hover { background: var(--primary-strong, #255BB3); } .ds-btn-primary:active { transform: scale(.99); background: var(--primary-strong, #255BB3); } .ds-btn-primary:focus-visible { outline: 3px solid var(--focus, #8DB4F2); outline-offset: 3px; }"
+    },
+    {
+      "name": "主按鈕（目前狀況）與警報描邊",
+      "kind": "button",
+      "refersTo": "button-scene",
+      "description": "底部列跨滿的主按鈕；警報時退成深灰面＋2px 藍色內描邊。",
+      "html": "<div style=\"display:grid;gap:10px\"><button class=\"ds-btn-scene\" type=\"button\">目前狀況</button><button class=\"ds-btn-scene ds-btn-scene--alert\" type=\"button\">目前狀況</button></div>",
+      "css": ".ds-btn-scene { min-height: 96px; border: 0; border-radius: var(--radius, 12px); background: var(--primary, #2D6CD2); color: #fff; font: inherit; font-size: 1.6rem; font-weight: 700; cursor: pointer; transition: background-color .2s, color .2s, box-shadow .2s; } .ds-btn-scene--alert { background: var(--surface, #171A1D); color: var(--text, #ECEEF0); box-shadow: inset 0 0 0 2px var(--primary, #2D6CD2); } .ds-btn-scene:focus-visible { outline: 3px solid var(--focus, #8DB4F2); outline-offset: 3px; }"
+    },
+    {
+      "name": "中性按鈕",
+      "kind": "button",
+      "refersTo": "button-neutral",
+      "description": "設定、語音說明、聲音、停止；深灰面＋1px 細線，關閉狀態文字弱化。",
+      "html": "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:10px\"><button class=\"ds-btn-neutral\" type=\"button\">語速：正常</button><button class=\"ds-btn-neutral\" type=\"button\" aria-pressed=\"false\">聲音 關</button></div>",
+      "css": ".ds-btn-neutral { min-height: 64px; border: 1px solid var(--line, #2B3035); border-radius: var(--radius, 12px); background: var(--surface-2, #1F2327); color: var(--text, #ECEEF0); font: inherit; font-size: 1rem; font-weight: 600; cursor: pointer; } .ds-btn-neutral:hover { background: var(--track, #262B30); } .ds-btn-neutral[aria-pressed=\"false\"] { color: var(--muted, #98A1A9); } .ds-btn-neutral:focus-visible { outline: 3px solid var(--focus, #8DB4F2); outline-offset: 3px; }"
+    },
+    {
+      "name": "狀態膠囊",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "頂部狀態列的連線狀態，圓點以狀態色表示。",
+      "html": "<div style=\"display:flex;gap:8px;flex-wrap:wrap\"><span class=\"ds-pill ds-pill--ok\"><i></i>偵測中</span><span class=\"ds-pill ds-pill--wait\"><i></i>準備中</span><span class=\"ds-pill ds-pill--bad\"><i></i>鏡頭中斷</span></div>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--surface, #171A1D); border: 1px solid var(--line, #2B3035); color: var(--text, #ECEEF0); font-size: .85rem; white-space: nowrap; } .ds-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted, #98A1A9); } .ds-pill--ok i { background: var(--green, #3CC850); } .ds-pill--wait i { background: var(--orange, #FF8C00); } .ds-pill--bad { border-color: rgba(229,57,53,.6); color: #FFB4A8; } .ds-pill--bad i { background: var(--red, #E53935); }"
+    },
+    {
+      "name": "狀態橫幅",
+      "kind": "custom",
+      "refersTo": "banner-safe",
+      "description": "招牌元件：安全、提醒、危險（唯一實心色塊＋脈動）、失去保護（雙線框）、待機。",
+      "html": "<div style=\"display:grid;gap:10px\"><div class=\"ds-banner\">前方安全</div><div class=\"ds-banner ds-banner--warn\">左前方有機車</div><div class=\"ds-banner ds-banner--red\">停</div><div class=\"ds-banner ds-banner--lost\">鏡頭中斷</div><div class=\"ds-banner ds-banner--idle\">準備中</div></div>",
+      "css": ".ds-banner { border-radius: var(--radius, 12px); padding: 14px 16px; text-align: center; font-size: 1.35rem; font-weight: 700; letter-spacing: .04em; background: rgba(60,200,80,.1); color: #8BE39A; border: 1px solid rgba(60,200,80,.35); transition: background-color .2s, color .2s, border-color .2s; } .ds-banner--warn { background: rgba(255,140,0,.12); color: #FFC37A; border-color: rgba(255,140,0,.45); } .ds-banner--red { background: var(--red, #E53935); color: #fff; border-color: var(--red, #E53935); animation: ds-pulse 1s ease-in-out infinite; } .ds-banner--lost { background: rgba(229,57,53,.12); color: #FFB4A8; border-color: var(--red, #E53935); box-shadow: inset 0 0 0 1px var(--red, #E53935); } .ds-banner--idle { background: var(--surface, #171A1D); color: var(--muted, #98A1A9); border-color: var(--line, #2B3035); } @keyframes ds-pulse { 50% { filter: brightness(1.15); } } @media (prefers-reduced-motion: reduce) { .ds-banner { transition: none; animation: none; } }"
+    },
+    {
+      "name": "儀表卡",
+      "kind": "card",
+      "refersTo": "gauge-card",
+      "description": "一張深灰卡內三列儀表，以細線分隔；數值與填充用狀態色。",
+      "html": "<div class=\"ds-gauges\"><div class=\"ds-gauge\"><div class=\"ds-gauge-head\"><span>碰撞風險</span><b style=\"color:#FF8C00\">62%</b></div><div class=\"ds-bar\"><div class=\"ds-fill\" style=\"width:62%;background:#FF8C00\"></div></div><div class=\"ds-detail\">左前方機車靠近</div></div><div class=\"ds-gauge\"><div class=\"ds-gauge-head\"><span>行人距離（越滿越近）</span><b style=\"color:#3CC850\">較遠</b></div><div class=\"ds-bar\"><div class=\"ds-fill\" style=\"width:24%\"></div></div><div class=\"ds-detail\">尚未偵測到行人</div></div></div>",
+      "css": ".ds-gauges { display: grid; background: var(--surface, #171A1D); border: 1px solid var(--line, #2B3035); border-radius: var(--radius, 12px); padding: 0 14px; color: var(--text, #ECEEF0); } .ds-gauge { padding: 8px 0; } .ds-gauge + .ds-gauge { border-top: 1px solid var(--line, #2B3035); } .ds-gauge-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; } .ds-gauge-head span { font-size: .85rem; color: var(--text-2, #C5CBD1); } .ds-gauge-head b { font-size: 1.2rem; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-bar { position: relative; height: 8px; border-radius: 999px; background: var(--track, #262B30); overflow: hidden; margin: 6px 0 4px; } .ds-fill { height: 100%; border-radius: 999px; background: var(--green, #3CC850); transition: width .3s ease, background-color .3s ease; } .ds-detail { font-size: .78rem; line-height: 1.4; color: var(--muted, #98A1A9); }"
+    },
+    {
+      "name": "細線條列",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "說明書式功能條列，上下 1px 細線，取代卡片牆。",
+      "html": "<ul class=\"ds-rules\"><li><b>只在可能撞上時提醒</b>從旁邊經過的人車不會吵你。</li><li><b>速度與橫越偵測</b>朝你衝來或從面前快速橫越的機車、行人都會提醒。</li></ul>",
+      "css": ".ds-rules { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line, #2B3035); } .ds-rules li { padding: 14px 0; border-bottom: 1px solid var(--line, #2B3035); font-size: .92rem; line-height: 1.6; color: var(--text-2, #C5CBD1); } .ds-rules b { display: block; color: var(--text, #ECEEF0); font-size: 1rem; font-weight: 600; margin-bottom: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "安靜的操作說明",
+    "overview": "畫面安靜得像一份操作說明，只有「會撞上」時才大聲。中性偏冷的近黑底、兩階深灰面、1px 細線分隔；沒有漸層、沒有發光、沒有投影。整個介面只有一個強調色（沉穩藍），給主要按鈕；紅、橘、綠、紫是安全語意，只在狀態上出現。\n\n畫面是給評審與明眼協助者的輔助，聲音才是主介面，所以視覺從不搶戲：大按鈕位置固定、資訊以細線條列，唯一會動的是警報時紅色橫幅的亮度脈動。警報時「目前狀況」主按鈕自動退成描邊，讓紅色成為畫面上唯一的實心色塊。",
+    "keyCharacteristics": [
+      "近黑底＋兩階深灰面，1px 細線分隔，平面無投影",
+      "單一強調色，只給主要按鈕",
+      "狀態色專用，不做裝飾",
+      "系統黑體，粗細只用 600／700",
+      "一種圓角（12px）貫穿所有區塊"
+    ],
+    "rules": [
+      { "name": "The One Blue Rule", "body": "沉穩藍只出現在主要動作上（開始偵測、目前狀況）。其他按鈕一律是深灰面加細線。", "section": "colors" },
+      { "name": "The Status-Only Rule", "body": "紅、橘、綠、紫只表示狀態，不得用於裝飾、品牌或控制項，包括「停止」按鈕。", "section": "colors" },
+      { "name": "The Only Solid Red Rule", "body": "警報時畫面上只能有一個實心色塊：紅色橫幅。主按鈕同時退成深灰面＋2px 藍色內描邊，大小與位置不變。", "section": "colors" },
+      { "name": "The 700 Ceiling Rule", "body": "粗細只用 600 與 700，不用 800 以上。", "section": "typography" },
+      { "name": "The Tabular Numbers Rule", "body": "會跳動的數字（統計、碰撞風險）一律 `tabular-nums`，避免畫面抖動。", "section": "typography" },
+      { "name": "The Fixed Controls Rule", "body": "大按鈕的大小、位置與順序是安全設計；任何改版不得移動它們。", "section": "layout" },
+      { "name": "The Flat Rule", "body": "不用外投影、光暈或漸層；需要強調時加一條線或換一階底色。", "section": "elevation" },
+      { "name": "The One Radius Rule", "body": "區塊一律 12px；不得混用其他圓角。", "section": "shapes" }
+    ],
+    "dos": [
+      "Do 讓沉穩藍只出現在主要動作；其他控制項用深灰面＋1px 細線。",
+      "Do 警報時讓紅色橫幅成為唯一實心色塊，主按鈕退成描邊。",
+      "Do 所有區塊用 12px 圓角，分隔用 1px 細線。",
+      "Do 字重只用 600／700；跳動數字用等寬數字。",
+      "Do 在 `prefers-reduced-motion` 下關閉所有過渡與脈動。"
+    ],
+    "donts": [
+      "Don't 用放射漸層、發光按鈕或外投影。",
+      "Don't 用彩色圓點卡片牆；功能說明用細線條列。",
+      "Don't 把紅、橘、綠、紫用在狀態以外，包括「停止」按鈕。",
+      "Don't 加入第二個強調色。",
+      "Don't 用 800 以上的字重。"
+    ]
+  }
+}

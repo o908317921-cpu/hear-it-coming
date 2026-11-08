@@ -3,104 +3,130 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0E1416">
+<meta name="theme-color" content="#0F1113">
 <title>盲人尋道系統</title>
 <link rel="icon" href="data:,">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="盲人尋道">
 <style>
+/* 簡約暗色：中性近黑底、兩階深灰面、細線分隔，不用漸層、發光與陰影。
+   唯一的強調色（無障礙標誌的沉穩藍）只給主要按鈕；紅、橘、綠、紫只用在狀態上。 */
 :root{
-  --bg:#0E1416; --surface:#162024; --surface-2:#1D2A2F; --line:#26363C;
-  --text:#EEF3F2; --muted:#93A4A8; --primary:#2A8C96; --primary-strong:#1F6F78;
-  --green:#3CC850; --orange:#FF8C00; --red:#E53935; --static:#9C5CD6; --track:#26343A;
-  --radius:14px; --gap:12px;
+  --bg:#0F1113; --surface:#171A1D; --surface-2:#1F2327; --line:#2B3035; --track:#262B30;
+  --text:#ECEEF0; --text-2:#C5CBD1; --muted:#98A1A9;
+  --primary:#2D6CD2; --primary-strong:#255BB3; --focus:#8DB4F2;
+  --green:#3CC850; --orange:#FF8C00; --red:#E53935; --static:#9C5CD6;
+  --radius:12px; --gap:12px;
   --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
+  color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);
   font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
   -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
-button{font:inherit;color:inherit}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+::selection{background:var(--primary);color:#fff}
 .num{font-variant-numeric:tabular-nums}
 
 /* ---------- 開始畫面 ---------- */
-#intro{position:fixed;inset:0;z-index:20;overflow:auto;display:flex;justify-content:center;
-  background:radial-gradient(120% 80% at 50% 0%,#1B3A3F 0%,var(--bg) 60%)}
+#intro{position:fixed;inset:0;z-index:20;overflow:auto;display:flex;justify-content:center;background:var(--bg)}
 #intro[hidden]{display:none}
 .intro-inner{width:100%;max-width:520px;padding:calc(32px + var(--safe-t)) 20px calc(28px + var(--safe-b));
   display:flex;flex-direction:column;gap:22px}
 .brand{display:flex;align-items:center;gap:12px}
-.brand-mark{width:44px;height:44px;border-radius:12px;background:var(--primary);display:grid;place-items:center}
-.brand h1{margin:0;font-size:1.35rem;letter-spacing:.02em}
+.brand-mark{flex:none;display:block;color:var(--text)}
+.brand h1{margin:0;font-size:1.35rem;font-weight:700;letter-spacing:.02em}
 .brand p{margin:2px 0 0;color:var(--muted);font-size:.85rem}
-.lead{margin:0;font-size:1.05rem;line-height:1.7;color:#D5DFDE}
-.features{display:grid;gap:10px;margin:0;padding:0;list-style:none}
-.features li{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);
-  border-radius:var(--radius);padding:12px 14px;font-size:.92rem;line-height:1.5;color:#CBD6D5}
-.features b{display:block;color:var(--text);font-size:.98rem;margin-bottom:2px}
-.dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:6px}
-#startBtn{min-height:36vh;border:0;border-radius:var(--radius);background:var(--primary);
-  font-size:2.2rem;font-weight:800;letter-spacing:.08em;box-shadow:0 8px 24px rgba(42,140,150,.35)}
-.prefs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.prefs button{min-height:64px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2);
-  font-size:1rem;font-weight:700}
+.lead{margin:0;font-size:1.05rem;line-height:1.7;color:var(--text-2)}
+.lead b{color:var(--text);font-weight:600}
+/* 功能說明：說明書式的條列，細線分隔 */
+.features{margin:0;padding:0;list-style:none;border-top:1px solid var(--line)}
+.features li{padding:14px 0;border-bottom:1px solid var(--line);font-size:.92rem;line-height:1.6;color:var(--text-2)}
+.features li[hidden]{display:none}
+.features b{display:block;color:var(--text);font-size:1rem;font-weight:600;margin-bottom:2px}
+#startBtn{min-height:36vh;border:0;border-radius:var(--radius);background:var(--primary);color:#fff;
+  font-size:2.2rem;font-weight:700;letter-spacing:.06em;transition:background-color .15s}
 #startBtn:disabled{opacity:.6}
 #startBtn:active{transform:scale(.99);background:var(--primary-strong)}
-#helpBtn{min-height:56px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2);
-  font-size:1rem;font-weight:700;color:var(--text)}
+.prefs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.prefs button,#helpBtn{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2);
+  font-size:1rem;font-weight:600;color:var(--text)}
+.prefs button{min-height:64px}
+#helpBtn{min-height:56px}
 #startError{margin:0;color:#FFB4A8;font-size:.9rem;line-height:1.6;min-height:1em}
 .qr{display:none;align-items:center;gap:16px;background:var(--surface);border:1px solid var(--line);
   border-radius:var(--radius);padding:14px}
-.qr img{width:120px;height:120px;border-radius:8px;background:#fff}
+.qr svg{flex:none;width:136px;height:136px;border-radius:6px}
 .qr p{margin:0;color:var(--muted);font-size:.88rem;line-height:1.6}
-.qr b{color:var(--text);display:block;font-size:1rem;margin-bottom:4px}
-@media (hover:hover) and (pointer:fine){.qr{display:flex}}
+.qr b{color:var(--text);display:block;font-size:1rem;font-weight:600;margin-bottom:4px}
+/* 電腦上：有 QR code 時排到標題下方、開始按鈕之前（只改視覺順序，讀螢幕與 Tab 順序不變；這一塊沒有可聚焦的元素） */
+@media (hover:hover) and (pointer:fine){.qr{display:flex}.brand{order:-2}.qr.has-code{order:-1}}
 #notice{margin:0;color:#FFC37A;font-size:.8rem;min-height:1em}
 .url{color:var(--text);word-break:break-all}
-.fineprint{margin:0;color:#6F8286;font-size:.78rem;line-height:1.6}
+.fineprint{margin:0;color:var(--muted);font-size:.8rem;line-height:1.6}
 
 /* ---------- 主畫面 ---------- */
 #app{min-height:100vh;display:flex;flex-direction:column}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding:calc(10px + var(--safe-t)) 16px 10px;position:sticky;top:0;z-index:5;
-  background:linear-gradient(var(--bg) 70%,rgba(14,20,22,0))}
+  padding:calc(10px + var(--safe-t)) 16px 10px;position:sticky;top:0;z-index:5;background:var(--bg)}
 .pill{display:inline-flex;flex:none;white-space:nowrap;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;
   background:var(--surface);border:1px solid var(--line);font-size:.85rem}
 .pill i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
-.pill.ok i{background:var(--green);box-shadow:0 0 0 4px rgba(60,200,80,.18)}
-.pill.bad i{background:var(--red);box-shadow:0 0 0 4px rgba(229,57,53,.18)}
+.pill.ok i{background:var(--green)}
 .pill.wait i{background:var(--orange)}
+.pill.bad{border-color:rgba(229,57,53,.6);color:#FFB4A8}
+.pill.bad i{background:var(--red)}
 #stats{color:var(--muted);font-size:.78rem;text-align:right}
 .layout{flex:1;display:flex;flex-direction:column;gap:var(--gap);padding:0 16px calc(190px + var(--safe-b))}
 .side{display:grid;gap:var(--gap)}
 #stage{position:relative;width:100%;margin:0 auto;border-radius:var(--radius);overflow:hidden;
   background:#000;border:1px solid var(--line);aspect-ratio:4/3;max-height:58vh}
+/* 有提示訊息（例如 iPhone 一直顯示的那句）時，影像等比例縮小約 44px 高，三個儀表仍露在按鈕上方 */
+@media (orientation:portrait){.layout:has(#notice:not(:empty)) #stage{width:calc(100% - 60px)}}
 #stage video,#stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
-#banner{border-radius:var(--radius);padding:14px 16px;text-align:center;font-size:1.35rem;font-weight:800;
-  letter-spacing:.04em;background:rgba(60,200,80,.12);color:#8BE39A;border:1px solid rgba(60,200,80,.35);
-  transition:background-color .2s,color .2s,border-color .2s}
+#banner{border-radius:var(--radius);padding:14px 16px;text-align:center;font-size:1.35rem;font-weight:700;
+  letter-spacing:.04em;text-wrap:balance;background:rgba(60,200,80,.1);color:#8BE39A;border:1px solid rgba(60,200,80,.35);
+  transition:background-color .2s,color .2s,border-color .2s;font-variant-emoji:text}
 #banner.red{background:var(--red);color:#fff;border-color:var(--red);animation:pulse 1s ease-in-out infinite}
-#banner.warn{background:rgba(255,140,0,.14);color:#FFC37A;border-color:rgba(255,140,0,.45)}
+#banner.warn{background:rgba(255,140,0,.12);color:#FFC37A;border-color:rgba(255,140,0,.45)}
 #banner.idle{background:var(--surface);color:var(--muted);border-color:var(--line)}
+/* 失去保護（鏡頭中斷、辨識卡住）：深紅底＋雙線紅框；不閃爍，和會撞上的實心紅色警報、橘色的一般提醒分開 */
+#banner.lost{color:#FFB4A8;background:rgba(229,57,53,.12);border-color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}
 @keyframes pulse{50%{filter:brightness(1.15)}}
-.gauges{display:grid;gap:10px}
-.gauge{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+/* 三個儀表合成一張卡、以細線分隔：手機直拿時才能全部露在下方按鈕上方 */
+.gauges{display:grid;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:0 14px}
+.gauge{padding:8px 0}
+.gauge+.gauge{border-top:1px solid var(--line)}
 .gauge .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.gauge .title{font-size:.9rem;color:#C9D4D3}
-.gauge .value{font-size:1.15rem;font-weight:800}
-.bar{position:relative;height:10px;border-radius:999px;background:var(--track);overflow:hidden;margin:8px 0 6px}
+.gauge .title{font-size:.85rem;color:var(--text-2)}
+/* 19.2px 粗體＝大字：狀態色（紅、紫）在深灰面上只需 3:1 */
+.gauge .value{font-size:1.2rem;line-height:1.1;font-weight:700}
+.bar{position:relative;height:8px;border-radius:999px;background:var(--track);overflow:hidden;margin:6px 0 4px}
 .bar>.fill{height:100%;width:0;border-radius:999px;background:var(--green);
   transition:width .3s ease,background-color .3s ease}
 .bar>.tick{position:absolute;top:0;bottom:0;width:2px;background:var(--surface)}
-.detail{font-size:.8rem;color:var(--muted);min-height:1.2em}
+.detail{font-size:.78rem;line-height:1.4;color:var(--muted);min-height:1.4em}
+/* 沒有訊息時不佔位置；元素仍留在畫面上（高度 0），讀螢幕的 live region 才能照常念出之後的訊息 */
+#notice:empty{position:absolute;min-height:0}
+#startError:empty{min-height:0;margin-top:-22px}
 .controls{position:fixed;left:0;right:0;bottom:0;z-index:6;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;
-  padding:12px 16px calc(12px + var(--safe-b));background:linear-gradient(rgba(14,20,22,0),var(--bg) 35%)}
+  padding:12px 16px calc(12px + var(--safe-b));background:var(--bg);border-top:1px solid var(--line)}
 .controls button{min-height:64px;border-radius:var(--radius);border:1px solid var(--line);
-  background:var(--surface-2);font-size:1.05rem;font-weight:700}
-#sceneBtn{grid-column:1 / -1;min-height:96px;font-size:1.6rem;background:var(--primary);border:0}
+  background:var(--surface-2);font-size:1.05rem;font-weight:600;font-variant-emoji:text}
+/* 🔊 在不支援單色字形的瀏覽器上仍是彩色 emoji：轉成灰階，維持只有一個強調色 */
+#voiceBtn:not(:focus-visible){filter:grayscale(1)}
+#sceneBtn{grid-column:1 / -1;min-height:96px;font-size:1.6rem;font-weight:700;background:var(--primary);color:#fff;border:0;
+  transition:background-color .2s,color .2s,box-shadow .2s}
+/* 警報時，主按鈕退成描邊：讓紅色橫幅成為畫面上唯一的實心色塊（大小、位置、功能都不變） */
+body:has(#banner.red) #sceneBtn{background:var(--surface);color:var(--text);box-shadow:inset 0 0 0 2px var(--primary)}
 .controls button[aria-pressed="false"]{color:var(--muted)}
-#stopBtn{background:#3A1F1F;border-color:#5A2B2B;color:#FFD2CC}
+/* 停止是控制項不是狀態：用中性色；防誤觸靠「按兩次」，不靠紅色 */
+@media (hover:hover){
+  .prefs button:hover,#helpBtn:hover,.controls button:not(#sceneBtn):hover{background:#262B30}
+  #startBtn:hover:not(:disabled){background:var(--primary-strong)}
+}
 @media (orientation:landscape) and (min-width:700px){
   .layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);align-items:start}
   #stage{max-height:calc(100vh - 150px)}
@@ -112,10 +138,8 @@ button{font:inherit;color:inherit}
 <section id="intro" aria-labelledby="introTitle">
   <div class="intro-inner">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
-      </div>
-      <div><h1 id="introTitle">盲人尋道系統</h1><p>智慧言語化視覺輔助｜大愛明眸（JavaScript 手機版）</p></div>
+      <svg class="brand-mark" aria-hidden="true" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 10.5v3M7.5 7v10M12 3.5v17M16.5 7.5v9M21 10v4"/></svg>
+      <div><h1 id="introTitle">盲人尋道系統</h1><p>智慧言語化視覺輔助（JavaScript 手機版）</p></div>
     </div>
     <button id="startBtn" type="button" autofocus>開始偵測</button>
     <p id="startError" role="alert" aria-live="assertive"></p>
@@ -126,10 +150,10 @@ button{font:inherit;color:inherit}
     </div>
     <p class="lead">把手機後鏡頭對準前方，系統會即時辨識行人與車輛，判斷距離、速度與碰撞時間，用<b>語音</b>和<b>警示音</b>提醒你。</p>
     <ul class="features">
-      <li><span class="dot" style="background:var(--red)"></span><div><b>只在可能撞上時提醒</b>從旁邊經過的人車不會吵你。「危險」代表約 3 秒內可能撞上，「停」代表快撞上了，請立刻停下。</div></li>
-      <li><span class="dot" style="background:var(--orange)"></span><div><b>速度與橫越偵測</b>朝你衝來或從面前快速橫越的機車、行人都會提醒。</div></li>
-      <li id="featureOverhead"><span class="dot" style="background:var(--static)"></span><div><b>頭部高度障礙</b>低垂的樹枝、招牌、柱子等頭部高度障礙物也會提醒。</div></li>
-      <li><span class="dot" style="background:var(--green)"></span><div><b>像倒車雷達一樣</b>只有一種警示音：越近越急促，很近時變成長音。戴上耳機時，聲音從物體所在的那一側傳來。偵測中約每 10 秒一聲輕音代表系統正常；兩聲低音重複代表暫時沒有偵測。</div></li>
+      <li><div><b>只在可能撞上時提醒</b>從旁邊經過的人車不會吵你。「危險」代表約 3 秒內可能撞上，「停」代表快撞上了，請立刻停下。</div></li>
+      <li><div><b>速度與橫越偵測</b>朝你衝來或從面前快速橫越的機車、行人都會提醒。</div></li>
+      <li id="featureOverhead"><div><b>頭部高度障礙</b>低垂的樹枝、招牌、柱子等頭部高度障礙物也會提醒。</div></li>
+      <li><div><b>像倒車雷達一樣</b>只有一種警示音：越近越急促，很近時變成長音。戴上耳機時，聲音從物體所在的那一側傳來。偵測中約每 10 秒一聲輕音代表系統正常；兩聲低音重複代表暫時沒有偵測。</div></li>
     </ul>
     <div class="qr" id="qrBox"><p><b>在手機上開啟這個網址</b><span class="url" id="pageUrl"></span><br>辨識全部在手機上執行，不需要電腦。第一次開啟會下載約 20～50 MB 的模型，建議連 Wi-Fi。</p></div>
     <p class="fineprint">影像只在你的手機上即時分析，不會上傳或儲存。本系統僅提供輔助提示，看不到地面的坑洞與高低差，請繼續使用導盲杖或導盲犬。</p>

@@ -6,6 +6,7 @@ import { AlertEngine, frameSummary, sceneSummary } from "./alerts.js";
 import { AudioOutput } from "./audio.js";
 import { DepthWorker } from "./depth.js";
 import { drawOverlay } from "./overlay.js";
+import { qrSvg } from "./qr.js";
 // detector.js 與 yolo.js 會從 CDN 載入 ONNX Runtime，放到按下開始才載入：
 // 寫在最上面的話，沒有網路時整個程式都載不起來，大按鈕按了沒反應，也沒有語音能說明原因
 let HazardDetector = null, YoloSegmenter = null;
@@ -293,9 +294,9 @@ setInterval(() => {
   if (lostSince == null) {
     lostSince = now;
     audio.beep = null;
-    setConn("wait", state === "camera" ? "鏡頭中斷" : "辨識卡住");
+    setConn("bad", state === "camera" ? "鏡頭中斷" : "辨識卡住");
   }
-  setBanner("warn", LOST_TEXT[state]);
+  setBanner("lost", LOST_TEXT[state]);   // 「沒有保護」要和光線不足等一般提醒（warn）分得出來
   if (now - lastLostTone >= LOST_TONE_MS) {
     lastLostTone = now;
     if (audio.enabled) audio.lostTone();
@@ -752,6 +753,22 @@ $("voiceBtn").onclick = () => {
 };
 
 // ---------- 開啟網頁時：讀取 settings.json ----------
+// 用電腦開啟時（有滑鼠的螢幕才顯示這一塊）畫出這個網址的 QR code，讓協助者用手機一掃就開。
+// localhost 不畫：手機掃了會連到手機自己；這時請掃 serve.py 黑色視窗裡的 QR code。
+function showQr() {
+  const box = $("qrBox");
+  if (!matchMedia("(hover:hover) and (pointer:fine)").matches) return;
+  if (/^(localhost|127\.|\[::1\]$)/.test(location.hostname) || location.protocol !== "https:") return;
+  try {
+    const svg = qrSvg(location.href);
+    if (!svg) return;              // 網址太長：只顯示文字
+    box.prepend(svg);
+    box.classList.add("has-code");
+  } catch (e) {
+    console.warn("QR code 產生失敗", e);
+  }
+}
+
 (async () => {
   const warnings = await loadSettings();
   warnings.forEach(w => console.warn(w));
@@ -763,6 +780,7 @@ $("voiceBtn").onclick = () => {
     $("startError").textContent = "這個網址不是 https，手機瀏覽器不會允許使用鏡頭。請改用 https 網址開啟（見 README）。";
   }
   $("pageUrl").textContent = location.href;
+  showQr();
   // iPhone 與沒有 WebGPU 的手機不跑深度模型：開始畫面不能說會提醒頭上的障礙
   if (isIOS || !navigator.gpu) $("featureOverhead").hidden = true;
 })();

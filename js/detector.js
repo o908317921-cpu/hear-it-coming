@@ -487,7 +487,7 @@ export class HazardDetector {
         maskReliable, horizontalPosition: horizontalPosition(det.box, w), growthPctS, lateralRate: latRate,
         speedPctS, speedSource, speedLevel, ttcSec: heldTtc, predictedPoint, inCollisionZone, onCourse,
         collisionProbability: probability, predictedOffsetPx: predictedPoint[0] - pathCenterX,
-        relativeVx, relativeVy, distanceCm: fusedM * 100, distanceSpeedCmS, approachState, proximityLevel,
+        vx, vy, relativeVx, relativeVy, distanceCm: fusedM * 100, distanceSpeedCmS, approachState, proximityLevel,
         isPredicted, distanceM: fusedM, occluded, truncated: [...truncated].sort(),
       });
     }

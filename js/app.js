@@ -1,7 +1,7 @@
 // 主程式：開鏡頭 → 每一幀交給偵測器 → 警報規則 → 語音／警示音／震動 → 畫框與面板。
 // 全部在手機瀏覽器裡執行，不需要電腦、不需要 Python，影像也不會離開手機。
 import { C, loadSettings } from "./config.js";
-import { riskColor } from "./analysis.js";
+import { riskColor, focalPx } from "./analysis.js";
 import { AlertEngine, frameSummary, sceneSummary } from "./alerts.js";
 import { AudioOutput } from "./audio.js";
 import { DepthWorker } from "./depth.js";
@@ -20,6 +20,9 @@ let yolo = null, depth = null, detector = null, engine = null;
 let stream = null, running = false, wasHidden = false, loopTimer = null;
 let runId = 0, inFlight = Promise.resolve(), starting = false;  // 每次開始／停止換編號，舊流程自動結束
 let lastTracks = [], lastHazards = [], hasFrame = false, stopArmed = 0, stopTimer = null;
+// 框要跟得上即時影像：辨識一幀要 0.1～0.3 秒，畫面卻是即時的。最新的辨識結果存在這裡，
+// 每次螢幕更新時，依物體自己的速度＋手機轉動的速度，把框移到「現在」應該在的位置再畫
+let overlayState = null, overlayRaf = 0, gyroLive = null, gyroLiveAt = -Infinity;
 // 分成短句：可以在句子之間示範提示音，警報也能隨時打斷；很長的一句在部分瀏覽器會念到一半停掉
 const GUIDE_STEPS = [
   "操作說明。請把手機直立固定在胸前，鏡頭朝向前方，螢幕保持開著。",
@@ -72,6 +75,9 @@ function onMotion(e) {
   const b = r.beta * Math.PI / 180, g = r.gamma * Math.PI / 180;
   const [yaw, pitch] = angle === 90 ? [b, -g] : angle === 270 ? [-b, g] : angle === 180 ? [-g, -b] : [g, b];
   gyroSum[0] += yaw; gyroSum[1] += pitch; gyroCount++;
+  // 即時角速度（輕微平滑）：畫框時用，不能等到下一次辨識才知道手機轉了
+  gyroLive = gyroLive && performance.now() - gyroLiveAt < 200 ? [0.5 * gyroLive[0] + 0.5 * yaw, 0.5 * gyroLive[1] + 0.5 * pitch] : [yaw, pitch];
+  gyroLiveAt = performance.now();
 }
 async function enableGyro() {
   try {
@@ -371,6 +377,36 @@ async function loop(id) {
   loopTimer = setTimeout(() => loop(id), Math.max(0, 1000 / C.MAX_FPS - elapsed));
 }
 
+// 把最新的辨識結果推算到現在再畫：位移 =（物體自己的速度 + 手機轉動造成的畫面移動）× 經過的時間。
+// 手機轉動優先用陀螺儀的即時讀數（每秒幾十次），沒有陀螺儀時用上一幀背景比對的結果
+function shiftBox([x1, y1, x2, y2], dx, dy) { return [x1 + dx, y1 + dy, x2 + dx, y2 + dy]; }
+let lastOverlayDraw = 0;
+function renderOverlay(t) {
+  overlayRaf = 0;
+  const s = overlayState;
+  if (!s || !running) return;
+  overlayRaf = requestAnimationFrame(renderOverlay);
+  if (t - lastOverlayDraw < C.OVERLAY_MIN_FRAME_MS) return;   // 慢手機不要每次螢幕更新都畫：運算要留給辨識
+  lastOverlayDraw = t;
+  const dt = Math.min(C.OVERLAY_MAX_EXTRAPOLATE_SEC, Math.max(0, (performance.now() - s.capturedAt) / 1000));
+  let [cvx, cvy] = s.cameraV;
+  if (gyroLive && performance.now() - gyroLiveAt < 200) {
+    const f = focalPx(s.w, s.h) * C.GYRO_GAIN;
+    [cvx, cvy] = [f * gyroLive[0], f * gyroLive[1]];
+  }
+  const tracks = s.tracks.map(tr => {
+    const dx = ((tr.vx || 0) + cvx) * dt, dy = ((tr.vy || 0) + cvy) * dt;
+    return {
+      ...tr, box: shiftBox(tr.box, dx, dy),
+      mask: tr.mask && !tr.mask.boxOnly ? { ...tr.mask, x: tr.mask.x + dx, y: tr.mask.y + dy } : tr.mask,
+      predictedPoint: tr.predictedPoint ? [tr.predictedPoint[0] + dx, tr.predictedPoint[1] + dy] : tr.predictedPoint,
+    };
+  });
+  // 靜態障礙不會自己動，只跟著手機轉動移動
+  const staticHazards = s.staticHazards.map(hz => ({ ...hz, box: shiftBox(hz.box, cvx * dt, cvy * dt) }));
+  drawOverlay(octx, s.w, s.h, tracks, { pathCenterX: s.pathCenterX, staticHazards });
+}
+
 async function processFrame(now, id) {
   const vw = video.videoWidth, vh = video.videoHeight;
   const k = Math.min(1, C.MAX_FRAME_SIDE / Math.max(vw, vh));
@@ -381,6 +417,7 @@ async function processFrame(now, id) {
     grab.width = w; grab.height = h;
     $("stage").style.aspectRatio = `${vw} / ${vh}`;
   }
+  const capturedAt = performance.now();     // 這一幀的拍攝時間：框要從這裡往後推算
   gctx.drawImage(video, 0, 0, w, h);
   const frame = { canvas: grab, imageData: gctx.getImageData(0, 0, w, h), width: w, height: h };
 
@@ -417,8 +454,10 @@ async function processFrame(now, id) {
     window.blindnavLog?.("alert", { text, dir, tracks: tracks.slice(0, 6).map(tr => [tr.rawLabel, tr.box, Number.isFinite(tr.ttcSec) ? +tr.ttcSec.toFixed(1) : null, tr.proximityLevel]) });
   }
 
-  // 畫面用鏡頭的即時影像（順），框是剛算完的這一幀；手機轉得太快時兩者對不上，先不畫
-  drawOverlay(octx, w, h, tracks, { pathCenterX: detector.cameraMotion.pathCenterX, staticHazards });
+  // 畫面用鏡頭的即時影像（順）；框由 renderOverlay 在每次螢幕更新時推算到現在的位置。手機轉得太快時仍先不畫
+  overlayState = { w, h, tracks, staticHazards, capturedAt, pathCenterX: detector.cameraMotion.pathCenterX,
+    cameraV: [detector.cameraMotion.vx, detector.cameraMotion.vy] };
+  if (!overlayRaf) overlayRaf = requestAnimationFrame(renderOverlay);
   $("overlay").style.visibility = performance.now() - lastFastTurn < 300 ? "hidden" : "visible";
   updatePanel(frameSummary(tracks), update, staticHazards);
   showWarnings();
@@ -639,6 +678,7 @@ function stopAll() {
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
   video.srcObject = null;
+  overlayState = null; cancelAnimationFrame(overlayRaf); overlayRaf = 0;
   octx.clearRect(0, 0, octx.canvas.width, octx.canvas.height);   // 下次開始前不能留著舊畫面
   wakeLock?.release().catch(() => {});     // 停止後螢幕可以正常關閉，省電
   wakeLock = null;

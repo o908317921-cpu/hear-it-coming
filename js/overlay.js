@@ -34,21 +34,28 @@ function chip(ctx, text, x, y, bg, fg, size) {
 }
 
 // 半透明遮罩：遮罩格子先畫到小畫布，再放大貼到物體位置
-const maskCanvas = document.createElement("canvas");
-const maskCtx = maskCanvas.getContext("2d");
+// 框每秒要重畫約 30 次：同一個遮罩只上色一次，之後直接貼上（遮罩內容只在每次辨識後才會變）
+const maskCache = new WeakMap();
 function drawMask(ctx, mask, color, alpha) {
   if (!mask || mask.boxOnly) return;     // 輕量模型沒有輪廓，只畫框
-  maskCanvas.width = mask.gw;
-  maskCanvas.height = mask.gh;
-  const img = maskCtx.createImageData(mask.gw, mask.gh);
-  const r = parseInt(color.slice(1, 3), 16), g = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
-  for (let i = 0; i < mask.data.length; i++) {
-    if (!mask.data[i]) continue;
-    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255 * alpha;
+  let cached = maskCache.get(mask.data);
+  if (!cached || cached.color !== color || cached.alpha !== alpha) {
+    const canvas = cached?.canvas || document.createElement("canvas");
+    canvas.width = mask.gw;
+    canvas.height = mask.gh;
+    const c2 = canvas.getContext("2d");
+    const img = c2.createImageData(mask.gw, mask.gh);
+    const r = parseInt(color.slice(1, 3), 16), g = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
+    for (let i = 0; i < mask.data.length; i++) {
+      if (!mask.data[i]) continue;
+      img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255 * alpha;
+    }
+    c2.putImageData(img, 0, 0);
+    cached = { canvas, color, alpha };
+    maskCache.set(mask.data, cached);
   }
-  maskCtx.putImageData(img, 0, 0);
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(maskCanvas, mask.x, mask.y, mask.gw * mask.cell, mask.gh * mask.cell);
+  ctx.drawImage(cached.canvas, mask.x, mask.y, mask.gw * mask.cell, mask.gh * mask.cell);
 }
 
 function arrow(ctx, from, to, color, width) {

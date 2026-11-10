@@ -18,6 +18,8 @@ export const C = {
   // 沒有輪廓的輕量模型估面積用：實測 109 張真實街景，輪廓面積佔框的比例（中位數）
   BOX_AREA_FILL: { person: 0.64, bicycle: 0.56, car: 0.79, motorcycle: 0.61, bus: 0.87, truck: 0.73 },
   BOX_AREA_FILL_DEFAULT: 0.7,
+  OVERLAY_MAX_EXTRAPOLATE_SEC: 0.5, // 框最多往後推算這麼久：辨識卡住時不能讓框一路飄走
+  OVERLAY_MIN_FRAME_MS: 30,       // 畫框最快每秒約 30 次，螢幕更新再快也不多畫
   OVERLAY_HIDE_TURN_DEG_S: 120,   // 手機轉得比這個快（度／秒）時先不畫框：畫面是即時的，框來自剛才那一幀，對不上
   WASM_MAX_THREADS: 4,            // WASM 最多用幾個執行緒（網頁要有跨來源隔離才能多執行緒）
   USE_WEBGPU: true,               // 有 WebGPU 的瀏覽器用顯示晶片加速；遇到相容問題可設為 false

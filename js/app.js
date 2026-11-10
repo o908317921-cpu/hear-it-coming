@@ -383,11 +383,16 @@ function shiftBox([x1, y1, x2, y2], dx, dy) { return [x1 + dx, y1 + dy, x2 + dx,
 let lastOverlayDraw = 0;
 function renderOverlay(t) {
   overlayRaf = 0;
-  const s = overlayState;
-  if (!s || !running) return;
+  if (!overlayState || !running) return;
   overlayRaf = requestAnimationFrame(renderOverlay);
   if (t - lastOverlayDraw < C.OVERLAY_MIN_FRAME_MS) return;   // 慢手機不要每次螢幕更新都畫：運算要留給辨識
-  lastOverlayDraw = t;
+  paintOverlay();
+}
+// 每次辨識完一定畫一次；螢幕更新被瀏覽器放慢時（省電模式、視窗被擋住），框也不會比辨識還少更新
+function paintOverlay() {
+  const s = overlayState;
+  if (!s) return;
+  lastOverlayDraw = performance.now();
   const dt = Math.min(C.OVERLAY_MAX_EXTRAPOLATE_SEC, Math.max(0, (performance.now() - s.capturedAt) / 1000));
   let [cvx, cvy] = s.cameraV;
   if (gyroLive && performance.now() - gyroLiveAt < 200) {
@@ -457,6 +462,7 @@ async function processFrame(now, id) {
   // 畫面用鏡頭的即時影像（順）；框由 renderOverlay 在每次螢幕更新時推算到現在的位置。手機轉得太快時仍先不畫
   overlayState = { w, h, tracks, staticHazards, capturedAt, pathCenterX: detector.cameraMotion.pathCenterX,
     cameraV: [detector.cameraMotion.vx, detector.cameraMotion.vy] };
+  paintOverlay();
   if (!overlayRaf) overlayRaf = requestAnimationFrame(renderOverlay);
   $("overlay").style.visibility = performance.now() - lastFastTurn < 300 ? "hidden" : "visible";
   updatePanel(frameSummary(tracks), update, staticHazards);

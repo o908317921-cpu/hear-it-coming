@@ -44,7 +44,7 @@ web
 
 ## Brand Commitments
 
-- **名稱：盲人尋道**（完整名稱「盲人尋道系統」）。
+- **名稱：盲人尋道**（英文名稱 hear-it-coming；副標題「智慧言語化視覺輔助系統」）。
 - 「大愛明眸」是舊的專題名稱，已從手機版 `index.html`（兩份）移除，不再使用。
 
 ## Evidence on Hand

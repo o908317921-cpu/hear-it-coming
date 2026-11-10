@@ -1,5 +1,5 @@
 ---
-name: 盲人尋道系統
+name: 盲人尋道
 description: 簡約暗色的操作說明式介面，只有「會撞上」時畫面才大聲
 colors:
   bg: "#0F1113"
@@ -140,7 +140,7 @@ components:
     height: "8px"
 ---
 
-# Design System: 盲人尋道系統
+# Design System: 盲人尋道
 
 ## Overview
 

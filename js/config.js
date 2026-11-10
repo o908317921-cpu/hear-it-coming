@@ -7,9 +7,11 @@ export const C = {
   // ============================================================
   // 1. 影像與模型
   // ============================================================
-  // YOLO11n-seg 已由 Python 版的 yolo11n-seg.pt 轉成 ONNX（輸入固定 448×448）
-  MODEL_URL: new URL("../models/yolo11n-seg.onnx", import.meta.url).href,
-  INFERENCE_SIZE: 448,
+  // 有顯示晶片時也用只偵測、輸入 320 的輕量模型。實測（同一台電腦、同一段畫面）：
+  // 每秒 7.6 → 12.1 幀，最慢時 YOLO 225 → 95 ms；正面走來的人提早 0.4 秒看到、提早 0.5 秒念出警報。
+  // 代價是畫面上不畫人形輪廓，只畫框。要換回分割模型：MODEL_URL 改回 yolo11n-seg.onnx、INFERENCE_SIZE 改回 448
+  MODEL_URL: new URL("../models/yolo11n-det-320.onnx", import.meta.url).href,
+  INFERENCE_SIZE: 320,
   // 沒有顯示晶片加速的手機用小一號的輸入：速度比遠處的小物體重要，來不及警告就沒有意義
   MODEL_URL_WASM: new URL("../models/yolo11n-det-320.onnx", import.meta.url).href,   // 只偵測、不算輪廓，實測快 1.66 倍，命中率沒有變差
   INFERENCE_SIZE_WASM: 320,

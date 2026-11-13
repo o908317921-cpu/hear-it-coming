@@ -235,6 +235,55 @@ export function trajectoryOnCourse(footX, objectWidth, frameWidth, relativeVx, t
   return start * end <= 0 || Math.abs(end) <= reach;
 }
 
+// ============================================================
+// 腳底向量：落地點換算到地面，在地面上看對方是不是朝使用者走來
+// ============================================================
+// 畫面上直線外推看不出斜向走來的人：會撞上的人方位固定，在畫面上的左右位置幾乎不動，
+// 外推結果永遠是「從旁邊經過」。落地點換算成地面上的公尺座標後，相對速度向量指向使用者就是會撞上。
+//
+// 落地點 → 地面座標 [橫向 X, 前方 Z]（公尺，使用者在原點、面向 +Z）。
+// xFromHeadingPx：落地點離行走方向中心幾像素；belowHorizonPx：落地點在地平線下幾像素
+export function groundPoint(xFromHeadingPx, belowHorizonPx, frameWidth, frameHeight) {
+  if (!(belowHorizonPx >= C.GROUND_MIN_BELOW_PX)) return null;   // 太接近地平線：差一個像素就是好幾公尺
+  const cameraM = C.CAMERA_HEIGHT_CM / 100;
+  return [xFromHeadingPx * cameraM / belowHorizonPx, cameraM * focalPx(frameWidth, frameHeight) / belowHorizonPx];
+}
+
+// 整個身體都看得到時改用框高當尺：距離 = 焦距 × 實際高度 ÷ 框高，橫向位置再照比例換算。
+// 上面的算法要假設手機拿得水平（地平線在畫面正中央），掛在胸前稍微朝下幾度，6 公尺外的人就會差到一倍；
+// 用框高就不必知道手機的俯仰。身高跟預設不同只會讓整體等比例縮放，不影響「幾秒後最接近」。
+export function groundPointByHeight(xFromHeadingPx, heightPx, rawLabel, frameWidth, frameHeight) {
+  const realCm = C.CLASS_REAL_HEIGHT_CM[rawLabel];
+  if (realCm == null || !(heightPx > 1)) return null;
+  return [xFromHeadingPx * realCm / 100 / heightPx, focalPx(frameWidth, frameHeight) * realCm / 100 / heightPx];
+}
+
+// samples：[[時間, X, Z]]。對 X、Z 各做直線回歸得到相對速度向量，算出最接近使用者的時刻與距離。
+// now：現在的時間（預設是最後一個樣本）。腳剛出畫面時最後幾個樣本是稍早的，位置要沿速度推到現在，TTC 才不會停住。
+// 回傳 {x, z, vx, vz, ttc, missM, missX}；樣本不夠或太舊回傳 null；沒在動或正在遠離時 ttc 為無限大
+export function groundApproach(samples, now = null) {
+  const n = samples.length;
+  if (n < C.GROUND_MIN_SAMPLES || samples[n - 1][0] - samples[0][0] < C.GROUND_MIN_SPAN_SEC) return null;
+  const ts = samples.map(s => s[0]);
+  const at = now ?? ts[n - 1];
+  if (at - ts[n - 1] > C.GROUND_MAX_STALE_SEC) return null;
+  const fit = values => {
+    const slope = linearSlope(ts, values);
+    const mean = v => v.reduce((a, b) => a + b, 0) / v.length;
+    return [mean(values) + slope * (at - mean(ts)), slope];   // 用回歸線上「現在」的位置，比單一幀穩定
+  };
+  const [x, vx] = fit(samples.map(s => s[1])), [z, vz] = fit(samples.map(s => s[2]));
+  const out = { x, z, vx, vz, ttc: Infinity, missM: Infinity, missX: x };
+  const speedSq = vx * vx + vz * vz;
+  if (speedSq < C.GROUND_MIN_SPEED_M_S ** 2) return out;
+  const t = -(x * vx + z * vz) / speedSq;
+  if (t <= 0) return out;
+  out.ttc = Math.min(t, C.TTC_MAX_CLAMP_SEC);
+  out.missX = x + vx * t;
+  out.missM = Math.hypot(out.missX, z + vz * t);
+  return out;
+}
+
 // 以 TTC 與預測落點估算 0-100 的碰撞可能性
 export function collisionProbability({ ttc, predictedX, objectWidth, frameWidth, pathRatio, maxTtc,
                                        centerX = null }) {

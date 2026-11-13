@@ -3,7 +3,7 @@ import { C, classLabel } from "./config.js";
 import {
   classifyApproach, classifyGrowth, classifyProximity, collisionProbability, combinedRiskPct, computeIou,
   depthDistanceM, distanceEstimates, effectiveOccupancy, estimatePersonDistanceCm, findDepthHazards, median,
-  groundReferenceDistanceM, lateralRate, lateralToSpeedPct, linearSlope, loomingDhDt, predictCollision,
+  groundApproach, groundPoint, groundPointByHeight, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, linearSlope, loomingDhDt, predictCollision,
   regressionWindow, relativeVelocity, trajectoryOnCourse, truncationSides,
 } from "./analysis.js";
 import { maskElongation } from "./yolo.js";
@@ -374,7 +374,8 @@ export class HazardDetector {
         }
         const sidesNow = truncationSides(det.box, w, h);
         trajHistory = trajHistory.concat([[now, footX - motion.offsetX, footY - motion.offsetY, height, x2 - x1,
-                                           h / 2 + motion.offsetY - y1, sidesNow.has("left") || sidesNow.has("right")]])
+                                           h / 2 + motion.offsetY - y1, sidesNow.has("left") || sidesNow.has("right"),
+                                           sidesNow.has("bottom"), sidesNow.has("top")]])
           .slice(-C.TRAJECTORY_HISTORY_LEN);
       }
       const win = regressionWindow(trajHistory, now);
@@ -396,6 +397,33 @@ export class HazardDetector {
         footX, footY, objectWidth: x2 - x1, frameWidth: w, frameHeight: h, vx, vy, height, dhDt,
         pathRatio: C.COLLISION_ZONE_RATIO, centerX: pathCenterX,
       });
+      // 腳底向量：看得到腳的那幾次偵測，把落地點換算到地面，用地面上的相對速度向量找最接近的時刻。
+      // 落地點存的是扣掉鏡頭轉動的值：加回現在的累積位移，就是它在「現在這個畫面」裡的位置
+      let ground = null, groundHits = 0, ttcSource = "looming";
+      if (C.GROUND_VECTOR_ENABLED && prev && !occludedByFront) {
+        // 腳被畫面下緣切掉：框底不是落地點。側邊被切掉：框的中心不是人的中心，露出來的部分變多會被當成橫向移動
+        const visible = win.filter(p => !p[7] && !p[6]);
+        // 整個身體都看得到、又知道這類物體大概多高：用框高當尺，不必假設手機拿得水平。
+        // 同一段軌跡只用一種算法，混著用時兩種算法的落差會被當成速度
+        const byHeight = C.CLASS_REAL_HEIGHT_CM[det.rawLabel] != null && visible.every(p => !p[8]);
+        const samples = [];
+        for (const p of visible) {
+          const xPx = p[1] + motion.offsetX - pathCenterX;
+          const point = byHeight ? groundPointByHeight(xPx, p[3], det.rawLabel, w, h) : groundPoint(xPx, p[2] - h / 2, w, h);
+          if (point && point[1] <= C.GROUND_MAX_RANGE_M) samples.push([p[0], point[0], point[1]]);
+        }
+        ground = groundApproach(samples, now);
+        const courseHit = !!ground && ground.missM <= C.GROUND_HIT_RADIUS_M;
+        groundHits = courseHit ? prev.groundHits + (isPredicted ? 0 : 1) : 0;
+        // 框高那邊已經判定會撞上、而且更早到，就照原來的；否則以腳底向量為準
+        if (courseHit && groundHits >= C.GROUND_CONFIRM_HITS && !(inCollisionZone && ttc <= ground.ttc)) {
+          const reach = w * C.COLLISION_ZONE_RATIO / 2 + Math.max(1, (x2 - x1) / 2);
+          ttc = ground.ttc;
+          predictedPoint = [pathCenterX + ground.missX / C.GROUND_HIT_RADIUS_M * reach, h - 1];
+          inCollisionZone = true;
+          ttcSource = "ground";
+        }
+      }
       const prevTtc = prev ? prev.ttcSec : Infinity;
       const prevHold = prev ? prev.ttcHoldCount : 0;
       // 暫留時不是停在舊值：物體還在靠近，TTC 要跟著時間倒數，「危險」才升得上「停」
@@ -404,14 +432,24 @@ export class HazardDetector {
       const sidesForTtc = truncationSides(det.box, w, h);
       const clipped = sidesForTtc.has("top") && sidesForTtc.has("bottom");
       const clippedHold = clipped && prev && now - prev.ttcMeasuredAt <= C.TTC_CLIPPED_HOLD_SEC;
-      const measured = Number.isFinite(ttc) && !(clippedHold && ttc > countdown);
+      // 腳底向量判定會撞上之後，人走近到腳出了畫面就量不到落地點了，但他還在走過來：照最後的 TTC 繼續倒數。
+      // 這時框高那邊算得出 TTC、卻因為畫面上的位置沒動而認為不會撞上，不能讓它把警報取消
+      // 框明顯在變小就是對方停下來或走開了，不再倒數
+      const shrinking = dhDt <= -Math.max(C.MIN_DH_DT_FOR_TTC, C.RECEDING_MIN_RATE * height);
+      const groundHold = ttcSource !== "ground" && prev && prev.ttcSource === "ground" && sidesForTtc.has("bottom")
+        && !shrinking && now - prev.ttcMeasuredAt <= C.TTC_CLIPPED_HOLD_SEC;
+      const measured = Number.isFinite(ttc) && !(clippedHold && ttc > countdown) && !(groundHold && !inCollisionZone);
       let heldTtc, holdCount;
       if (measured) [heldTtc, holdCount] = [ttc, 0];
-      else if (Number.isFinite(countdown) && (prevHold < C.TTC_HOLD_FRAMES || clippedHold)) [heldTtc, holdCount] = [countdown, prevHold + 1];
+      else if (Number.isFinite(countdown) && (prevHold < C.TTC_HOLD_FRAMES || clippedHold || groundHold)) [heldTtc, holdCount] = [countdown, prevHold + 1];
       else [heldTtc, holdCount] = [Infinity, 0];
       const ttcMeasuredAt = measured ? now : (prev ? prev.ttcMeasuredAt : now);
       // dh/dt 短暫低於門檻時 TTC 暫留，「會不會撞上」也要跟著暫留，否則警報與警示音會一閃一閃
-      if (!measured && Number.isFinite(heldTtc)) inCollisionZone = prev.inCollisionZone;
+      if (!measured && Number.isFinite(heldTtc)) {
+        inCollisionZone = prev.inCollisionZone;
+        ttcSource = prev.ttcSource;
+        if (groundHold) [ttc, predictedPoint] = [heldTtc, [pathCenterX, h - 1]];
+      }
       const [relativeVx, relativeVy] = relativeVelocity(vx, vy);
       let probability = collisionProbability({
         ttc, predictedX: predictedPoint[0], objectWidth: x2 - x1, frameWidth: w,
@@ -478,7 +516,7 @@ export class HazardDetector {
         trajHistory, distanceSpeedCmS, mask: displayMask, vx, vy, blurScore: det.blurScore,
         isBlurry: det.isBlurry, elongation: det.elongation, maskQuality: det.maskQuality,
         ttcSec: heldTtc, ttcHoldCount: holdCount, ttcTime: now, ttcMeasuredAt, proximityLevel, speedLevel, depthM, depthTime,
-        inCollisionZone, maskRejects,
+        inCollisionZone, maskRejects, groundHits, ttcSource,
       });
 
       results.push({
@@ -489,6 +527,7 @@ export class HazardDetector {
         collisionProbability: probability, predictedOffsetPx: predictedPoint[0] - pathCenterX,
         vx, vy, relativeVx, relativeVy, distanceCm: fusedM * 100, distanceSpeedCmS, approachState, proximityLevel,
         isPredicted, distanceM: fusedM, occluded, truncated: [...truncated].sort(),
+        ttcSource, groundVector: ground && { x: ground.x, z: ground.z, vx: ground.vx, vz: ground.vz, missM: ground.missM },
       });
     }
 

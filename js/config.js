@@ -182,6 +182,16 @@ export const C = {
   SCALE_JUMP_PER_SEC: 1.2,
   TTC_CLIPPED_HOLD_SEC: 3.0,      // 物體大到上下都超出畫面時已經量不到靠近速度：照最後的 TTC 倒數最多這麼久
   COLLISION_ZONE_RATIO: 0.35,
+  // 腳底向量：落地點換算到地面，用地面上的相對速度向量判斷會不會撞上（斜向走來、交錯而來的人）
+  GROUND_VECTOR_ENABLED: true,
+  GROUND_HIT_RADIUS_M: 0.6,       // 預測最接近時離使用者不到這麼遠：算會撞上（兩個人的半個身寬加一點餘裕）
+  GROUND_MIN_SPEED_M_S: 0.4,      // 相對速度比這個慢：分不出是在動還是框在抖，不算
+  GROUND_MAX_RANGE_M: 12.0,       // 比這個遠的落地點不用：離地平線太近，差幾個像素就差好幾公尺
+  GROUND_MIN_BELOW_PX: 20.0,      // 落地點至少在地平線下這麼多像素才換算
+  GROUND_MIN_SAMPLES: 4,          // 至少幾次看得到腳的偵測
+  GROUND_MIN_SPAN_SEC: 0.3,       // 這些偵測至少橫跨這麼久
+  GROUND_MAX_STALE_SEC: 0.5,      // 最後一次看到腳已經是這麼久以前：不再用這些樣本推算
+  GROUND_CONFIRM_HITS: 2,        // 連續幾次都判定會撞上才算，單一幀的抖動不算
   MIN_DH_DT_FOR_TTC: 15.0,
   RECEDING_MIN_RATE: 0.15,        // 框高每秒縮小超過這個比例才算遠離；用比例，近處的大框才不會因為抖動被當成遠離
   ATTENTION_GROWTH_PCT_S: 8.0,

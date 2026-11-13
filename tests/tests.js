@@ -824,6 +824,89 @@ test("人近到上下都超出畫面：TTC 繼續倒數，升得上「停」", a
   assert(late.every((v, i) => i === 0 || v <= late[i - 1] + 1e-6), `要一路往下：${late}`);
 });
 
+// ---------- 腳底向量：斜向走來、交錯而來的行人 ----------
+// 依針孔幾何把地面上的人（橫向 x、前方 z 公尺）畫成框；鏡頭高 1.2 m、人高 1.7 m、焦距 700
+// tilt：手機沒拿水平時，整個畫面上下偏移幾像素（正值 = 鏡頭朝上，畫面內容往下移）
+function personBox(x, z, tilt = 0) {
+  const height = 700 * 1.7 / z, footX = 320 + 700 * x / z, footY = 240 + tilt + 700 * 1.2 / z;
+  return [footX - height * 0.175, footY - height, footX + height * 0.175, footY].map(Math.round);
+}
+// path(t) 回傳 [x, z]；回傳每一幀的追蹤結果（每秒 10 幀）
+async function walk(path, seconds, tilt = 0) {
+  const yolo = new FakeCrowd(n => { const [x, z] = path(n / 10); return z > 0.4 ? [personBox(x, z, tilt)] : []; });
+  const det = new HazardDetector(yolo, null), frames = [];
+  for (let i = 0; i < seconds * 10; i++) frames.push(await det.process(scene, (i + 1) / 10));
+  return frames;
+}
+test("腳底向量：落地點換算到地面、速度向量指向使用者就是會撞上", () => {
+  const [x, z] = A.groundPoint(700 * 2 / 6, 700 * 1.2 / 6, 640, 480);
+  close(x, 2); close(z, 6);
+  eq(A.groundPoint(100, C.GROUND_MIN_BELOW_PX - 1, 640, 480), null, "太接近地平線不換算");
+  const samples = (p0, v) => [...Array(6).keys()].map(i => [i * 0.1, p0[0] + v[0] * i * 0.1, p0[1] + v[1] * i * 0.1]);
+  const toward = A.groundApproach(samples([2, 6], [-0.5, -1.5]));
+  close(toward.ttc, 3.5, 1e-6); assert(toward.missM < 1e-6);
+  const passing = A.groundApproach(samples([1, 6], [0, -2.5]));
+  close(passing.missM, 1, 1e-6);
+  eq(A.groundApproach(samples([2, 6], [0.5, 1])).ttc, Infinity, "遠離");
+  eq(A.groundApproach(samples([0, 3], [0, 0])).ttc, Infinity, "沒在動");
+  eq(A.groundApproach(samples([2, 6], [-0.5, -1.5]).slice(0, C.GROUND_MIN_SAMPLES - 1)), null, "樣本不夠");
+});
+test("腳底向量：斜向走來的人方位不變，畫面外推會漏掉，腳底向量抓得到", async () => {
+  // 從右前方 2 m、前方 6 m 朝使用者直直走來，4 秒後撞上：在畫面上的左右位置完全不動
+  const toward = t => [2 * (1 - t / 4), 6 * (1 - t / 4)];
+  const enabled = C.GROUND_VECTOR_ENABLED;
+  C.GROUND_VECTOR_ENABLED = false;
+  let old;
+  try { old = await walk(toward, 3.5); } finally { C.GROUND_VECTOR_ENABLED = enabled; }
+  const oldFirst = old.findIndex(anyDanger);
+  assert(oldFirst < 0 || 4 - oldFirst / 10 < 1.5, `（對照）只靠畫面外推時，要到剩不到 1.5 秒才發現，實際第 ${oldFirst} 幀`);
+  const frames = await walk(toward, 3.5);
+  const first = frames.findIndex(anyDanger);
+  assert(first >= 0, "腳底向量要判定會撞上");
+  const truth = 4 - first / 10, tr = frames[first][0];
+  assert(truth >= 2.5, `要在 TTC 約 3 秒時就判定，實際離撞上剩 ${truth.toFixed(1)} 秒`);
+  assert(Math.abs(tr.ttcSec - truth) < 0.4, `TTC ${tr.ttcSec}，應約 ${truth}`);
+  eq(tr.ttcSource, "ground");
+  // 走近到腳出了畫面之後繼續倒數，升得上「停」
+  const urgent = frames.findIndex(f => f.some(t => t.inCollisionZone && t.ttcSec <= C.TTC_URGENT_SEC));
+  assert(urgent > first, "腳出畫面後要繼續倒數到「停」");
+  for (const f of frames.slice(first, urgent + 1)) assert(anyDanger(f), "中途不能解除");
+});
+test("腳底向量：錯身而過、遠處橫越、站在旁邊的人不算", async () => {
+  const quiet = async (name, path, seconds) => {
+    const frames = await walk(path, seconds), bad = frames.findIndex(anyDanger);
+    assert(bad < 0, `${name}：第 ${bad} 幀誤判會撞上（TTC ${frames[bad]?.[0]?.ttcSec}）`);
+  };
+  await quiet("錯身", t => [1.1, 9 - 2.5 * t], 3);                  // 對向走來，橫向隔 1.1 公尺
+  await quiet("遠處橫越", t => [2 - 1.4 * t, 6], 3);                // 在 6 公尺外從右走到左
+  await quiet("站在旁邊", t => [1.2, 8 - 1.2 * t], 4);              // 使用者往前走，對方站著不動
+  await quiet("斜向走遠", t => [0.5 + 0.5 * t, 4 + 0.8 * t], 3);
+});
+test("腳底向量：手機朝上或朝下拿幾度，結果一樣", async () => {
+  // 60 像素約 5 度。整個身體都看得到時用框高當尺，不必假設地平線在畫面正中央
+  const [x, z] = A.groundPointByHeight(700 * 2 / 6, 700 * 1.7 / 6, "person", 640, 480);
+  close(x, 2); close(z, 6);
+  eq(A.groundPointByHeight(100, 200, "chair", 640, 480), null, "不知道實際高度的類別不用這個算法");
+  for (const tilt of [-60, 60]) {
+    const frames = await walk(t => [2 * (1 - t / 4), 6 * (1 - t / 4)], 2, tilt), first = frames.findIndex(anyDanger);
+    assert(first >= 0 && 4 - first / 10 >= 2.5, `偏移 ${tilt} 像素：要在約 3 秒前判定，實際第 ${first} 幀`);
+    assert(Math.abs(frames[first][0].ttcSec - (4 - first / 10)) < 0.4, `偏移 ${tilt} 像素：TTC ${frames[first][0].ttcSec}`);
+    const passing = await walk(t => [1.1, 9 - 2.5 * t], 2.4, tilt), bad = passing.findIndex(anyDanger);
+    assert(bad < 0, `偏移 ${tilt} 像素：錯身而過第 ${bad} 幀誤判會撞上`);
+  }
+});
+test("腳底向量：對方停下來或走開，倒數就停", async () => {
+  // 斜向走來、腳出了畫面之後（約 3 公尺）掉頭走開
+  const frames = await walk(t => (t < 2 ? [2 * (1 - t / 4), 6 * (1 - t / 4)] : [1 + 0.3 * (t - 2), 3 + 1.2 * (t - 2)]), 4);
+  assert(frames.slice(0, 20).some(anyDanger), "走過來的時候要報");
+  assert(!frames.slice(-8).some(anyDanger), "走開之後不能還在倒數");
+});
+test("腳底向量：斜向切進來、會在面前撞上的人要報", async () => {
+  // 使用者往前走 1.2 m/s，對方從左邊橫著走過來，兩人 3.5 秒後走到同一點
+  const frames = await walk(t => [-1.75 + 0.5 * t, 5.5 - 1.2 * t - 0.37 * t], 3);
+  assert(frames.some(anyDanger), "要判定會撞上");
+});
+
 // ---------- 模型下載：斷線、卡住、不完整都要拿到完整的檔案 ----------
 const DATA = Uint8Array.from({ length: 1000 }, (_, i) => i % 251);
 function fakeServer(script) {

@@ -797,7 +797,9 @@ test("TTC 短暫中斷時「會撞上」也跟著暫留", async () => {
     const [tr] = await det.process(scene, (i + 1) / 10);
     if (tr && Number.isFinite(tr.ttcSec) && tr.ttcSec < C.TTC_MAX_CLAMP_SEC) states.push(tr.inCollisionZone);
   }
-  assert(states.length && states.every(Boolean), JSON.stringify(states));
+  // 一開始要連續幾次都判定會撞上才算（ZONE_CONFIRM_HITS）；算數之後就不能再一閃一閃
+  const from = states.indexOf(true);
+  assert(from >= 0 && from <= C.ZONE_CONFIRM_HITS && states.slice(from).every(Boolean), JSON.stringify(states));
 });
 test("遠離的物體不在路徑上，靜止擋路的在", async () => {
   assert(!(await runDetector(45, 30, n => 300 - n * 4)).results.at(-1)[0].onCourse);
@@ -905,6 +907,69 @@ test("腳底向量：斜向切進來、會在面前撞上的人要報", async ()
   // 使用者往前走 1.2 m/s，對方從左邊橫著走過來，兩人 3.5 秒後走到同一點
   const frames = await walk(t => [-1.75 + 0.5 * t, 5.5 - 1.2 * t - 0.37 * t], 3);
   assert(frames.some(anyDanger), "要判定會撞上");
+});
+
+// ---------- 交錯（對向錯身而過）：不能太早喊、不能一直重複、聲音不能亂跳 ----------
+// 把偵測結果接到警報規則，回傳念過的句子與每一幀的警示音（每秒 10 幀）
+async function walkAndListen(path, seconds) {
+  const frames = await walk(path, seconds), engine = new AlertEngine(0), said = [], beeps = [];
+  frames.forEach((tracks, i) => {
+    const u = engine.update(tracks, (i + 1) / 10, false);
+    said.push(...texts(u)); beeps.push(u.beep);
+  });
+  return { said, beeps };
+}
+test("交錯：對向走來、橫向隔 0.7 公尺錯身而過，不喊危險也不說很快", async () => {
+  // 兩個人對向走（相對 2.5 m/s），從 10 公尺外走到身邊。畫面外推在 8 公尺外會把他算成「會撞上」
+  for (const side of [0.7, -0.7, 0.9]) {
+    const { said, beeps } = await walkAndListen(t => [side, 10 - 2.5 * t], 3.8);
+    eq(said, [], `橫向隔 ${side} 公尺`);
+    assert(beeps.every(b => !b), `橫向隔 ${side} 公尺不該有警示音`);
+  }
+});
+test("交錯：正面走來的人照樣在 3 秒前喊危險、再喊停", async () => {
+  for (const side of [0, 0.2]) {
+    const { said } = await walkAndListen(t => [side, 10 - 2.5 * t], 3.8);
+    assert(said[0]?.startsWith("危險") && said.some(x => x.startsWith("停")), `橫向隔 ${side} 公尺：${JSON.stringify(said)}`);
+  }
+  const frames = await walk(t => [0, 10 - 2.5 * t], 3.8), first = frames.findIndex(anyDanger);
+  assert(first >= 0 && 4 - (first + 1) / 10 >= 2.6, `第 ${first} 幀才判定，離撞上只剩 ${(4 - (first + 1) / 10).toFixed(1)} 秒`);
+});
+test("交錯：只有一幀判定會撞上（框抖了一下）不算", async () => {
+  // 站在 4 公尺外不動的人，框高只在某一幀跳了一下
+  const det = new HazardDetector(new FakeCrowd(n => [personBox(0.2, n === 12 ? 3.6 : 4)]), null);
+  for (let i = 0; i < 25; i++) assert(!anyDanger(await det.process(scene, (i + 1) / 10)), `第 ${i} 幀誤判會撞上`);
+});
+test("交錯：一串人陸續走來，同一句話不會連續念，「停」不受限", () => {
+  const engine = new AlertEngine(0), spoken = [];
+  // 每 2.5 秒換一個新的人（新的追蹤編號），都在右前方、都判定會撞上
+  for (let i = 0; i < 100; i++) {
+    const t = i / 10, id = 1 + Math.floor(t / 2.5);
+    texts(engine.update([track({ trackId: id, ttcSec: 2.6, inCollisionZone: true, horizontalPosition: "right" })], t, false))
+      .forEach(x => spoken.push([t, x]));
+  }
+  assert(spoken.length >= 2, "隔得夠久還是要再提醒");
+  for (let i = 1; i < spoken.length; i++) {
+    assert(spoken[i][0] - spoken[i - 1][0] >= C.SAME_TEXT_GAP_SEC - 1e-9, `同一句只隔 ${spoken[i][0] - spoken[i - 1][0]} 秒：${JSON.stringify(spoken)}`);
+  }
+  const u = engine.update([track({ trackId: 99, ttcSec: 1, inCollisionZone: true, horizontalPosition: "right" })], 10.1, false);
+  eq(texts(u), ["停，右前方行人"]);
+  eq(texts(new AlertEngine(0).update([track({ trackId: 1, ttcSec: 1, inCollisionZone: true })], 0, false)), ["停，正前方行人"]);
+});
+test("交錯：判定在邊緣閃爍時，警示音節奏不會快慢快慢亂跳", () => {
+  const engine = new AlertEngine(0), patterns = [];
+  // 一個「很快」的人（慢節奏），會撞上的判定每隔一幀有、一幀沒有（快節奏）
+  for (let i = 0; i < 30; i++) {
+    const hit = i % 2 === 0;
+    const u = engine.update([track({ speedLevel: "fast", speedPctS: 90, ttcSec: 2.5, inCollisionZone: hit, distanceM: 6 })], i / 10, false);
+    patterns.push(JSON.stringify(u.beep));
+  }
+  eq(new Set(patterns).size, 1, "節奏應該維持在比較急的那一種");
+  // 變急要馬上變；危險過了、穩定一小段時間後才變緩
+  const calm = [];
+  for (let i = 30; i < 50; i++) calm.push(engine.update([track({ speedLevel: "fast", speedPctS: 90, ttcSec: 2.5, distanceM: 6 })], i / 10, false).beep);
+  eq(calm[0], A.beepPattern("near")); eq(calm.at(-1), A.beepPattern("far"));
+  eq(engine.update([track({ ttcSec: 1, inCollisionZone: true })], 5.0, false).beep, A.beepPattern("close"));
 });
 
 // ---------- 模型下載：斷線、卡住、不完整都要拿到完整的檔案 ----------

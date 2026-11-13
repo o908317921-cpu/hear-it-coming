@@ -6,7 +6,8 @@ export class AudioOutput {
     this.enabled = true;
     this.ctx = null;
     this.speakingPri = -1;
-    this.beep = null;            // [頻率, 響聲 ms, 間隔 ms] 或 null
+    this._beep = null;           // [頻率, 響聲 ms, 間隔 ms] 或 null（用 this.beep 讀寫）
+    this.voiceStarted = false;   // 語音引擎真的開始出聲了（送出到出聲之間，有些手機要等半秒以上）
     this.beepPan = 0;
     this.rate = C.SPEECH_RATE;
     this.speechDeadline = 0;
@@ -17,6 +18,14 @@ export class AudioOutput {
     this.statusTimer = null;
     this.currentUtterance = null;
     this.stepsToken = 0;
+  }
+
+  get beep() { return this._beep; }
+  // 節奏變急（或從無到有）時馬上響：迴圈還在等上一個節奏的間隔，慢節奏要等將近 0.8 秒，快撞上時等不起
+  set beep(pattern) {
+    const old = this._beep;
+    this._beep = pattern;
+    if (pattern && this.running && this.ctx && (!old || pattern[2] < old[2])) this.beepLoop(++this.loopId);
   }
 
   // iPhone 規定聲音必須在使用者點擊後才能開始，所以要在「開始偵測」按下時呼叫
@@ -66,6 +75,7 @@ export class AudioOutput {
   hush() {
     this.currentUtterance = null;
     this.speakingPri = -1;
+    this.voiceStarted = false;
     window.speechSynthesis?.cancel();
   }
 
@@ -109,11 +119,12 @@ export class AudioOutput {
     this.speakingPri = Math.max(this.speakingPri, pri);
     this.currentUtterance = u;
     // 前一句念完、輪到排隊的這句時，才換成它的優先順序（低優先的句子要能被打斷）
-    u.onstart = () => { if (u === this.currentUtterance) this.speakingPri = pri; };
+    u.onstart = () => { if (u === this.currentUtterance) { this.speakingPri = pri; this.voiceStarted = true; } };
     // 被打斷時 currentUtterance 已經換人，不會接著念下一步（有些瀏覽器取消時也會觸發 onend）
     u.onend = u.onerror = () => {
       if (u === this.currentUtterance) {
         this.speakingPri = -1;
+        this.voiceStarted = false;
         this.currentUtterance = null;
         if (onDone) onDone();
       }
@@ -187,8 +198,9 @@ export class AudioOutput {
       return;
     }
     const [freq, on, off] = this.beep;
-    // 念警報時先讓路；念操作說明、目前狀況時照響，不能因為在聽說明就沒有警示音
-    if (this.enabled && (!this.speaking() || this.speakingPri <= 0)) this.tone(freq, on, this.ctx.currentTime + 0.02, this.beepPan);
+    // 念警報時先讓路；念操作說明、目前狀況時照響，不能因為在聽說明就沒有警示音。
+    // 語音送出後到真的出聲之前也照響：這段空檔完全沒聲音的話，等於撞上了才有反應
+    if (this.enabled && (!this.speaking() || this.speakingPri <= 0 || !this.voiceStarted)) this.tone(freq, on, this.ctx.currentTime + 0.02, this.beepPan);
     if (navigator.vibrate) navigator.vibrate(on);
     setTimeout(() => this.beepLoop(id), on + off);
   }

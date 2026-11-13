@@ -3,7 +3,7 @@ import { C, classLabel } from "./config.js";
 import {
   classifyApproach, classifyGrowth, classifyProximity, collisionProbability, combinedRiskPct, computeIou,
   depthDistanceM, distanceEstimates, effectiveOccupancy, estimatePersonDistanceCm, findDepthHazards, median,
-  groundApproach, groundPoint, groundPointByHeight, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, linearSlope, loomingDhDt, predictCollision,
+  groundApproach, groundPoint, groundPointByHeight, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, predictCollision,
   regressionWindow, relativeVelocity, trajectoryOnCourse, truncationSides,
 } from "./analysis.js";
 import { maskElongation } from "./yolo.js";
@@ -399,7 +399,7 @@ export class HazardDetector {
       });
       // 腳底向量：看得到腳的那幾次偵測，把落地點換算到地面，用地面上的相對速度向量找最接近的時刻。
       // 落地點存的是扣掉鏡頭轉動的值：加回現在的累積位移，就是它在「現在這個畫面」裡的位置
-      let ground = null, groundHits = 0, ttcSource = "looming";
+      let ground = null, groundHits = 0, groundSince = null, groundCourse = false, passingBy = false, ttcSource = "looming";
       if (C.GROUND_VECTOR_ENABLED && prev && !occludedByFront) {
         // 腳被畫面下緣切掉：框底不是落地點。側邊被切掉：框的中心不是人的中心，露出來的部分變多會被當成橫向移動
         const visible = win.filter(p => !p[7] && !p[6]);
@@ -413,10 +413,24 @@ export class HazardDetector {
           if (point && point[1] <= C.GROUND_MAX_RANGE_M) samples.push([p[0], point[0], point[1]]);
         }
         ground = groundApproach(samples, now);
-        const courseHit = !!ground && ground.missM <= C.GROUND_HIT_RADIUS_M;
+        // 比人寬的物體（汽車）半徑再往外加；已經判定會撞上的，放寬一點才解除，判定才不會在邊緣一閃一閃
+        const halfWidthM = (C.CLASS_REAL_HEIGHT_CM[det.rawLabel] ?? 0) / 100 * (x2 - x1) / height / 2;
+        const radius = !ground ? 0 : (hitRadiusM(ground.ttc) + Math.max(0, halfWidthM - C.HIT_RADIUS_BODY_M))
+          * (prev.groundCourse ? C.HIT_RELEASE_SCALE : 1);
+        const courseHit = !!ground && ground.missM <= radius;
+        groundCourse = courseHit;
+        // 錯身而過：畫面外推用的是固定的像素寬度，8 公尺外的 84 像素等於左右各 1 公尺，
+        // 對向走來、只是從旁邊經過的人在遠處全都會被算成「會撞上」。整個框都看得到、又知道這類物體多高時，
+        // 腳底向量算得出錯身距離（公尺）：超過半徑就不算會撞上，也不算在路徑上
+        passingBy = byHeight && !!ground && Number.isFinite(ground.ttc) && !courseHit
+          && !truncationSides(det.box, w, h).size;
+        if (passingBy) inCollisionZone = false;
         groundHits = courseHit ? prev.groundHits + (isPredicted ? 0 : 1) : 0;
+        groundSince = courseHit ? (prev.groundSince ?? now) : null;
         // 框高那邊已經判定會撞上、而且更早到，就照原來的；否則以腳底向量為準
-        if (courseHit && groundHits >= C.GROUND_CONFIRM_HITS && !(inCollisionZone && ttc <= ground.ttc)) {
+        if (courseHit && groundHits >= C.GROUND_CONFIRM_HITS
+            && (prev.ttcSource === "ground" || now - groundSince >= C.GROUND_CONFIRM_SEC)
+            && !(inCollisionZone && ttc <= ground.ttc)) {
           const reach = w * C.COLLISION_ZONE_RATIO / 2 + Math.max(1, (x2 - x1) / 2);
           ttc = ground.ttc;
           predictedPoint = [pathCenterX + ground.missX / C.GROUND_HIT_RADIUS_M * reach, h - 1];
@@ -450,6 +464,13 @@ export class HazardDetector {
         ttcSource = prev.ttcSource;
         if (groundHold) [ttc, predictedPoint] = [heldTtc, [pathCenterX, h - 1]];
       }
+      // 單一幀的抖動不能喊「危險」：要連續幾次都判定會撞上才算；快撞上了就少等一點，腳已經出畫面（就在面前）完全不等
+      const zoneHits = Number.isFinite(heldTtc) && heldTtc <= C.TTC_DANGER_SEC && inCollisionZone
+        ? (prev ? prev.zoneHits : 0) + (isPredicted ? 0 : 1) : 0;
+      const trackedLongEnough = win.length > 1 && win[win.length - 1][0] - win[0][0] >= C.ZONE_MIN_SPAN_SEC;
+      const zoneConfirmed = inCollisionZone && (trackedLongEnough || (prev && prev.zoneConfirmed))
+        && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneHits >= (heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_HITS : sidesForTtc.has("bottom") ? 1 : C.ZONE_CONFIRM_HITS_URGENT)
+            || (prev && prev.zoneConfirmed && zoneHits > 0));
       const [relativeVx, relativeVy] = relativeVelocity(vx, vy);
       let probability = collisionProbability({
         ttc, predictedX: predictedPoint[0], objectWidth: x2 - x1, frameWidth: w,
@@ -506,8 +527,9 @@ export class HazardDetector {
       const speedLevel = classifyGrowth(speedPctS, prev ? prev.speedLevel : null);
       // 以預測軌跡為主：沿軌跡外推後不在行走路徑上、或正在遠離的物體，距離與速度風險打折
       const receding = dhDt <= -Math.max(C.MIN_DH_DT_FOR_TTC, C.RECEDING_MIN_RATE * height);
-      const onCourse = !receding && (inCollisionZone || trajectoryOnCourse(footX, x2 - x1, w, relativeVx, ttc,
-        C.COLLISION_ZONE_RATIO, C.COURSE_HORIZON_SEC, pathCenterX));
+      // 錯身而過的人也不算在路徑上：兩個人對向走，面積本來就變得很快，不能因此念「很快」
+      const onCourse = !receding && (inCollisionZone || (!passingBy && trajectoryOnCourse(footX, x2 - x1, w, relativeVx, ttc,
+        C.COLLISION_ZONE_RATIO, C.COURSE_HORIZON_SEC, pathCenterX)));
       probability = combinedRiskPct(probability, levelRatio, proximityLevel, speedPctS, speedLevel, proximityScale, onCourse);
 
       updated.set(trackId, {
@@ -516,14 +538,14 @@ export class HazardDetector {
         trajHistory, distanceSpeedCmS, mask: displayMask, vx, vy, blurScore: det.blurScore,
         isBlurry: det.isBlurry, elongation: det.elongation, maskQuality: det.maskQuality,
         ttcSec: heldTtc, ttcHoldCount: holdCount, ttcTime: now, ttcMeasuredAt, proximityLevel, speedLevel, depthM, depthTime,
-        inCollisionZone, maskRejects, groundHits, ttcSource,
+        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneConfirmed, groundCourse,
       });
 
       results.push({
         trackId, label: det.label, rawLabel: det.rawLabel, box: det.box, mask: displayMask, state,
         smoothSpeed, occupancyRatio, blurScore: det.blurScore, elongation: det.elongation, motionBlurConfirmed,
         maskReliable, horizontalPosition: horizontalPosition(det.box, w), growthPctS, lateralRate: latRate,
-        speedPctS, speedSource, speedLevel, ttcSec: heldTtc, predictedPoint, inCollisionZone, onCourse,
+        speedPctS, speedSource, speedLevel, ttcSec: heldTtc, predictedPoint, inCollisionZone: zoneConfirmed, onCourse,
         collisionProbability: probability, predictedOffsetPx: predictedPoint[0] - pathCenterX,
         vx, vy, relativeVx, relativeVy, distanceCm: fusedM * 100, distanceSpeedCmS, approachState, proximityLevel,
         isPredicted, distanceM: fusedM, occluded, truncated: [...truncated].sort(),

@@ -192,6 +192,15 @@ export const C = {
   GROUND_MIN_SPAN_SEC: 0.3,       // 這些偵測至少橫跨這麼久
   GROUND_MAX_STALE_SEC: 0.5,      // 最後一次看到腳已經是這麼久以前：不再用這些樣本推算
   GROUND_CONFIRM_HITS: 2,        // 連續幾次都判定會撞上才算，單一幀的抖動不算
+  GROUND_CONFIRM_SEC: 0.3,        // 而且要持續這麼久：連續兩幀用的幾乎是同一批樣本，一起抖錯不算確認
+  // 錯身而過：預測「最接近時離使用者多遠」，推得愈遠愈不準，對方也還來得及自己閃開。
+  // 還有 TTC_DANGER_SEC 秒才到時要落在 HIT_RADIUS_FAR_M 內才算會撞上，剩 TTC_URGENT_SEC 秒時放寬到 GROUND_HIT_RADIUS_M
+  HIT_RADIUS_FAR_M: 0.4,
+  ZONE_CONFIRM_HITS: 3,           // 連續這麼多次偵測都判定會撞上才喊「危險」（每秒 10 幀時約晚 0.2 秒）
+  ZONE_CONFIRM_HITS_URGENT: 2,    // 已經在「停」的範圍內：只多等一次
+  ZONE_MIN_SPAN_SEC: 0.3,         // 剛看到的物體只有兩三個樣本，算出來的 TTC 是雜訊：至少追蹤這麼久才喊
+  HIT_RADIUS_BODY_M: 0.3,         // 半徑裡已經算進去的半個身寬；比這個寬的物體（汽車）再往外加
+  HIT_RELEASE_SCALE: 1.3,         // 已經判定會撞上之後，落點要超出半徑的這個倍數才解除，判定才不會在邊緣一閃一閃
   MIN_DH_DT_FOR_TTC: 15.0,
   RECEDING_MIN_RATE: 0.15,        // 框高每秒縮小超過這個比例才算遠離；用比例，近處的大框才不會因為抖動被當成遠離
   ATTENTION_GROWTH_PCT_S: 8.0,
@@ -228,6 +237,8 @@ export const C = {
   ALARM_PROGRESS_M: 0.3,          // 比這次警報中的最近距離再近這麼多，才算「又靠近了」，警示立刻恢復
   CLEAR_AFTER_SEC: 3.0,           // 警報結束這麼久才念「警報解除」，判定閃爍時不會一直解除又警報
   ALARM_VOICE_MIN_GAP_SEC: 2.0,
+  SAME_TEXT_GAP_SEC: 4.0,         // 一模一樣的句子至少隔這麼久才再念（一串人陸續經過時不會一直重複同一句）；「停」不受限
+  BEEP_DOWN_HOLD_SEC: 0.6,        // 警示音變急馬上變，要變緩或停下來得先穩定這麼久，判定在邊緣時才不會快慢快慢亂跳
   ALARM_VOICE_GLOBAL_GAP_SEC: 1.5, // 不同類語音之間至少隔多久，誤報與嘮叨都會讓使用者不再信任警示
   SPEED_ALERT_MAX_TTC_SEC: 3.0,   // 朝使用者靠近的物體要 TTC 也認為快到了才報：遠處小目標的面積雜訊很大
   TOP_SCALE_MIN_PX: 30.0,         // 頭頂高於地平線至少這麼多像素，才用它當截斷時的尺度

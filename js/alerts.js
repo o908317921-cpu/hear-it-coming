@@ -82,6 +82,8 @@ export class AlertEngine {
     this.lastTtcSeen = -Infinity;
     this.lastTtcVoice = -Infinity;
     this.lastAnyVoice = -Infinity;
+    this.lastSaid = new Map();        // 句子 → 上次念的時間
+    this.heldBeep = null;             // 目前的警示音節奏 {level, pan, at}
     this.alarmSpoken = false;         // 這次危險念過警報，結束時才需要念「警報解除」
     this.darkSince = null;
     this.lastLowLightVoice = -Infinity;
@@ -136,6 +138,11 @@ export class AlertEngine {
     return this.longGaps >= 2 ? 0 : Infinity;
   }
 
+  // 一模一樣的句子剛念過：一串人陸續經過時，同一句話連續念只會讓人不想聽
+  saidRecently(text, ts) {
+    return ts - (this.lastSaid.get(text) ?? -Infinity) < C.SAME_TEXT_GAP_SEC;
+  }
+
   // 分兩級：危險 → 停。判定短暫閃斷（TTC_RELEASE_SEC 內）不算重新靠近，否則同一個人會被一直喊「危險」
   ttcSpeech(ttcHits, ts, out) {
     // 記憶裡的是「念過」的物體：還在危險就延長；沒念過的（被語音間隔擋下）下一幀還要再試，不能吃掉
@@ -146,19 +153,22 @@ export class AlertEngine {
     };
     const newHits = fresh(ttcHits, this.ttcLastHit);
     const newUrgent = fresh(ttcHits.filter(tr => tr.ttcSec <= C.TTC_URGENT_SEC), this.ttcLastUrgent);
+    const say = (template, tr) => fmt(template, { dir: C.DIRECTION_TEXT[tr.horizontalPosition], obj: tr.label });
+    // 剛念過的同一句先不念（沒念到的留在名單裡，之後還在危險會再試）；警示音照響，「停」不受限
+    const sayable = newHits.filter(tr => !this.saidRecently(say(C.TTC_ALERT_TEXT, tr), ts));
     let template, priority, worst;
     if (newUrgent.length) {
       [template, priority, worst] = [C.TTC_URGENT_ALERT_TEXT, C.SPEECH_PRIORITY.urgent, minBy(newUrgent, tr => tr.ttcSec)];
       this.ttcLastUrgent.set(worst.trackId, ts);
-    } else if (newHits.length && ts - this.lastTtcVoice >= C.ALARM_VOICE_MIN_GAP_SEC) {
-      [template, priority, worst] = [C.TTC_ALERT_TEXT, C.SPEECH_PRIORITY.ttc, minBy(newHits, tr => tr.ttcSec)];
+    } else if (sayable.length && ts - this.lastTtcVoice >= C.ALARM_VOICE_MIN_GAP_SEC) {
+      [template, priority, worst] = [C.TTC_ALERT_TEXT, C.SPEECH_PRIORITY.ttc, minBy(sayable, tr => tr.ttcSec)];
     } else {
       return;
     }
     this.ttcLastHit.set(worst.trackId, ts);
     this.lastTtcVoice = ts;
     out.alerts.push([`${worst.label}即將撞上`, worst.horizontalPosition]);
-    out.speech.push([fmt(template, { dir: C.DIRECTION_TEXT[worst.horizontalPosition], obj: worst.label }), priority]);
+    out.speech.push([say(template, worst), priority]);
   }
 
   // ts 單位為秒
@@ -217,7 +227,7 @@ export class AlertEngine {
         if (unannounced.length && sinceVoice >= C.ALARM_VOICE_MIN_GAP_SEC
             && (!wasOn || sinceVoice >= repeatGap)) {
           const speak = maxBy(unannounced, severity);
-          waiting.push({ priority: C.SPEECH_PRIORITY[kind], kind, text: sayText(speak), log: logText(speak),
+          if (!this.saidRecently(sayText(speak), ts)) waiting.push({ priority: C.SPEECH_PRIORITY[kind], kind, text: sayText(speak), log: logText(speak),
                          dir: speak.horizontalPosition });
         }
       }
@@ -235,10 +245,19 @@ export class AlertEngine {
       candidates.push([nearest.ttcSec <= C.TTC_URGENT_SEC ? "close" : "near", C.SPEECH_PRIORITY.ttc,
                        horizontalPan(nearest, frameWidth)]);
     }
-    if (candidates.length) {
-      const best = maxBy(candidates, c => levelIndex(c[0]) * 100 + c[1]);
-      out.beep = beepPattern(best[0]);
-      out.beepPan = best[2];
+    // 變急馬上變；要變緩或停下來，得先穩定 BEEP_DOWN_HOLD_SEC。判定在邊緣閃爍時節奏才不會快慢快慢亂跳
+    const best = candidates.length ? maxBy(candidates, c => levelIndex(c[0]) * 100 + c[1]) : null;
+    const held = this.heldBeep;
+    if (best && (!held || levelIndex(best[0]) >= levelIndex(held.level))) {
+      this.heldBeep = { level: best[0], pan: best[2], at: ts };
+    } else if (held && ts - held.at >= C.BEEP_DOWN_HOLD_SEC) {
+      this.heldBeep = best ? { level: best[0], pan: best[2], at: ts } : null;
+    } else if (held && best) {
+      held.pan = best[2];
+    }
+    if (this.heldBeep) {
+      out.beep = beepPattern(this.heldBeep.level);
+      out.beepPan = this.heldBeep.pan;
     }
 
     // 一次只念最緊急的一句；剛念過警報就先等一下，沒念到的下一幀還有機會，不會被吃掉
@@ -252,6 +271,7 @@ export class AlertEngine {
       out.speech.push([pick.text, pick.priority]);
     }
 
+    for (const [text] of out.speech) this.lastSaid.set(text, ts);
     // 危險結束：只有真的念過警報才說解除
     if (out.speech.length) {
       this.alarmSpoken = true;

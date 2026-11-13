@@ -223,6 +223,11 @@ export function loomingDhDt(win, height, sides, reachesPath = false, frameHeight
   return rate * height;
 }
 
+// 判定「會撞上」的半徑（公尺）：愈久以後的事愈不準，半徑愈小
+export function hitRadiusM(ttc) {
+  return piecewiseLinear(ttc, [[C.TTC_URGENT_SEC, C.GROUND_HIT_RADIUS_M], [C.TTC_DANGER_SEC, C.HIT_RADIUS_FAR_M]]);
+}
+
 // 預測軌跡是否會落在使用者行走路徑上：沿橫向速度外推 min(TTC, horizon) 秒。
 // 靜止在路徑上、或途中會穿過路徑的物體都算；從旁邊經過、正往外離開的物體不算。
 export function trajectoryOnCourse(footX, objectWidth, frameWidth, relativeVx, ttc,

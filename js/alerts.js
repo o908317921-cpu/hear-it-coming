@@ -86,6 +86,9 @@ export class AlertEngine {
     this.heldBeep = null;             // 目前的警示音節奏 {level, pan, at}
     this.lastHazard = -Infinity;      // 最後一次真的看到危險的時間
     this.lastAlarmSpeech = -Infinity;
+    this.lastSpeechUrgent = false;
+    this.hazardSince = -Infinity;     // 這一段危險從什麼時候開始
+    this.speedSince = null;
     this.alarmSpoken = false;         // 這次危險念過警報，結束時才需要念「警報解除」
     this.darkSince = null;
     this.lastLowLightVoice = -Infinity;
@@ -218,6 +221,7 @@ export class AlertEngine {
       // 語音播放時警示音會暫停；念完前不算解除，否則短暫的紅色狀態只聽得到一聲
       if (redItems.length || (wasOn && speaking)) this.alarmLastSeen[kind] = ts;
       present[kind] = redItems.length > 0;
+      if (kind === "speed") this.speedSince = redItems.length ? (this.speedSince ?? ts) : null;
       if (redItems.length) {
         const worst = maxBy(redItems, severity);
         this.alarmPan[kind] = horizontalPan(worst, frameWidth);
@@ -229,9 +233,10 @@ export class AlertEngine {
         // 已經在喊「危險／停」的物體不用再說一次「很近／很快」，警示音會持續響
         const unannounced = redItems.filter(item => !hitIds.has(item.trackId));
         if (unannounced.length && sinceVoice >= C.ALARM_VOICE_MIN_GAP_SEC
-            && (!wasOn || sinceVoice >= repeatGap)) {
+            && (!wasOn || (sinceVoice >= repeatGap && this.alarmRepeats[kind] < C.ALARM_VOICE_MAX_SAYS))) {
           const speak = maxBy(unannounced, severity);
-          if (!this.saidRecently(sayText(speak), ts)) waiting.push({ priority: C.SPEECH_PRIORITY[kind], kind, text: sayText(speak), log: logText(speak),
+          const tooSoon = kind === "speed" && speak.speedSource !== "lateral" && ts - this.speedSince < C.SPEED_VOICE_AFTER_SEC;
+          if (!tooSoon && !this.saidRecently(sayText(speak), ts)) waiting.push({ priority: C.SPEECH_PRIORITY[kind], kind, text: sayText(speak), log: logText(speak),
                          dir: speak.horizontalPosition });
         }
       }
@@ -243,8 +248,16 @@ export class AlertEngine {
 
     // 唯一的警示音：在所有響著的警報中挑最急的節奏（同節奏時依語音優先順序）
     // 警示音只跟著「現在還看得到的危險」：東西不在了就停，不等警報解除
-    if (ttcHits.length || AlertEngine.KINDS.some(k => present[k])) this.lastHazard = ts;
-    out.hush = speaking && ts - this.lastHazard >= C.BEEP_OFF_HOLD_SEC && ts - this.lastAlarmSpeech < 5;
+    if (ttcHits.length || AlertEngine.KINDS.some(k => present[k])) {
+      if (ts - this.lastHazard > C.CLEAR_AFTER_SEC) this.hazardSince = ts;
+      this.lastHazard = ts;
+    }
+    // 路徑上還看得到東西時，判定只是暫時閃斷（對方還在走過來）：多等一下，不能把「危險」念到一半切掉
+    const inView = allTracks.some(tr => tr.onCourse !== false);   // 含漏抓一兩幀、暫留中的物體
+    const offHold = inView ? C.BEEP_DOWN_HOLD_SEC : C.BEEP_OFF_HOLD_SEC;
+    // 「停」不切：人近到畫面裝不下時偵測會斷，那正是最需要聽完的時候
+    out.hush = speaking && !this.lastSpeechUrgent && ts - this.lastAlarmSpeech < 5
+      && ts - this.lastHazard >= (inView ? C.ALARM_RELEASE_HOLD_SEC : C.BEEP_OFF_HOLD_SEC);
     const candidates = AlertEngine.KINDS.filter(k => present[k] && !this.settled(k, ts))
       .map(k => [this.alarmLevel[k], C.SPEECH_PRIORITY[k], this.alarmPan[k]]);
     if (ttcHits.length) {
@@ -257,7 +270,7 @@ export class AlertEngine {
     const held = this.heldBeep;
     if (best && (!held || levelIndex(best[0]) >= levelIndex(held.level))) {
       this.heldBeep = { level: best[0], pan: best[2], at: ts };
-    } else if (held && ts - held.at >= (best ? C.BEEP_DOWN_HOLD_SEC : C.BEEP_OFF_HOLD_SEC)) {
+    } else if (held && ts - held.at >= (best ? C.BEEP_DOWN_HOLD_SEC : offHold)) {
       this.heldBeep = best ? { level: best[0], pan: best[2], at: ts } : null;
     } else if (held && best) {
       held.pan = best[2];
@@ -279,13 +292,16 @@ export class AlertEngine {
     }
 
     for (const [text] of out.speech) this.lastSaid.set(text, ts);
-    if (out.speech.length) this.lastAlarmSpeech = ts;
+    if (out.speech.length) {
+      this.lastAlarmSpeech = ts;
+      this.lastSpeechUrgent = out.speech.some(s => s[1] >= C.SPEECH_PRIORITY.urgent);
+    }
     // 危險結束：只有真的念過警報才說解除
     if (out.speech.length) {
       this.alarmSpoken = true;
     } else if (this.alarmSpoken && !speaking && ts - this.lastAlarmOn >= C.CLEAR_AFTER_SEC) {
       this.alarmSpoken = false;
-      out.speech.push([C.CLEAR_TEXT, C.SPEECH_PRIORITY.info]);
+      if (this.lastHazard - this.hazardSince >= C.CLEAR_MIN_ALARM_SEC) out.speech.push([C.CLEAR_TEXT, C.SPEECH_PRIORITY.info]);
     }
 
     // ④ 光線不足

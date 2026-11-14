@@ -175,6 +175,8 @@ export const C = {
   OFF_COURSE_RISK_SCALE: 0.5,
   TTC_WARNING_MULTIPLIER: 1.0,
   TTC_HOLD_FRAMES: 6,
+  LOOMING_MIN_GROWTH_PX: 8,       // 回歸的時間窗內框高至少要長大這麼多像素（或下面的比例，取大者）才算靠近：比這個小就是抖動
+  LOOMING_MIN_GROWTH_RATIO: 0.05,
   LOOMING_MIN_WIDTH_SHARE: 0.25,  // 框寬的成長率連框高的這個比例都不到，不算靠近
   TRUNCATED_NEAR_MIN_HEIGHT: 0.25, // 腳被切掉的物體，框至少有畫面這麼高才算偏近（鏡頭上仰時最下緣露出的一顆頭不算）
   OCCLUDED_OVERLAP_RATIO: 0.2,    // 框有這麼多被「站得更前面的物體」蓋住：看到的大小不可信，不拿來估靠近速度
@@ -198,7 +200,12 @@ export const C = {
   HIT_RADIUS_FAR_M: 0.4,
   ZONE_CONFIRM_HITS: 3,           // 連續這麼多次偵測都判定會撞上才喊「危險」（每秒 10 幀時約晚 0.2 秒）
   ZONE_CONFIRM_HITS_URGENT: 2,    // 已經在「停」的範圍內：只多等一次
-  ZONE_MIN_SPAN_SEC: 0.3,         // 剛看到的物體只有兩三個樣本，算出來的 TTC 是雜訊：至少追蹤這麼久才喊
+  // 遠處的小框：框高差兩三個像素，算出來的 TTC 就差一倍，要連續更多次才算（機車在 20 公尺外不會因為雜訊就喊「停」）
+  ZONE_FAR_HEIGHT_RATIO: 0.2,     // 框高不到畫面高度的這個比例算小框
+  ZONE_CONFIRM_HITS_FAR: 5,
+  ZONE_MIN_SPAN_SEC: 0.6,         // 剛看到的物體只有兩三個樣本，算出來的 TTC 是雜訊：至少追蹤這麼久才喊
+  ZONE_MIN_SPAN_NEAR_SEC: 0.3,    // 已經很近的大框（突然從轉角出現的人）等不起，雜訊相對也小：只等這麼久
+  ZONE_NEAR_HEIGHT_RATIO: 0.4,    // 框高超過畫面高度的這個比例算「很近」
   HIT_RADIUS_BODY_M: 0.3,         // 半徑裡已經算進去的半個身寬；比這個寬的物體（汽車）再往外加
   HIT_RELEASE_SCALE: 1.3,         // 已經判定會撞上之後，落點要超出半徑的這個倍數才解除，判定才不會在邊緣一閃一閃
   MIN_DH_DT_FOR_TTC: 15.0,
@@ -233,12 +240,15 @@ export const C = {
   ALARM_RELEASE_HOLD_SEC: 1.5,
   ALARM_VOICE_REPEAT_SEC: 5.0,    // 物體持續紅色時，第一次重複提醒的間隔；之後每次加倍
   ALARM_VOICE_REPEAT_MAX_SEC: 60.0, // 重複提醒的間隔上限：站著排隊、跟人說話時不能一直念
+  ALARM_VOICE_MAX_SAYS: 2,        // 同一個近物沒有更靠近時最多念這麼多次（第一次＋提醒一次）；又靠近或換了物體會重新算
   ALARM_SETTLED_SEC: 8.0,         // 同一個近物持續這麼久都沒有更靠近，就停掉警示音（語音仍會偶爾提醒）
   ALARM_PROGRESS_M: 0.3,          // 比這次警報中的最近距離再近這麼多，才算「又靠近了」，警示立刻恢復
   CLEAR_AFTER_SEC: 3.0,           // 警報結束這麼久才念「警報解除」，判定閃爍時不會一直解除又警報
   ALARM_VOICE_MIN_GAP_SEC: 2.0,
   SAME_TEXT_GAP_SEC: 4.0,         // 一模一樣的句子至少隔這麼久才再念（一串人陸續經過時不會一直重複同一句）；「停」不受限
   BEEP_OFF_HOLD_SEC: 0.3,         // 前方已經沒有東西：這麼久之後警示音就停、念到一半的警報也切掉（只容許漏抓一兩幀）
+  SPEED_VOICE_AFTER_SEC: 0.5,     // 「很快」（朝使用者靠近）要持續這麼久才念：真的會撞上時「危險」會先到，不要三句話搶著講
+  CLEAR_MIN_ALARM_SEC: 1.0,       // 危險至少持續這麼久，結束時才念「警報解除」；一閃而過的不用特地解除
   BEEP_DOWN_HOLD_SEC: 0.6,        // 警示音變急馬上變，要變緩或停下來得先穩定這麼久，判定在邊緣時才不會快慢快慢亂跳
   ALARM_VOICE_GLOBAL_GAP_SEC: 1.5, // 不同類語音之間至少隔多久，誤報與嘮叨都會讓使用者不再信任警示
   SPEED_ALERT_MAX_TTC_SEC: 3.0,   // 朝使用者靠近的物體要 TTC 也認為快到了才報：遠處小目標的面積雜訊很大

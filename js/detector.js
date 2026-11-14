@@ -387,6 +387,10 @@ export class HazardDetector {
         const halfPath = w * C.COLLISION_ZONE_RATIO / 2;
         dhDt = loomingDhDt(win, height, truncationSides(det.box, w, h),
           x1 < pathCenterX + halfPath && x2 > pathCenterX - halfPath, h);
+        // 這段時間框總共才長大幾個像素：跟框本身的抖動分不出來，不算在靠近。
+        // 剛看到的物體只有三四個樣本時最容易這樣，遠處的機車會因此被喊「停」
+        const grownPx = dhDt * (ts[ts.length - 1] - ts[0]);
+        if (dhDt > 0 && grownPx < Math.max(C.LOOMING_MIN_GROWTH_PX, C.LOOMING_MIN_GROWTH_RATIO * height)) dhDt = 0;
         const rawDistanceSpeed = -linearSlope(ts, hs.map(estimatePersonDistanceCm));
         distanceSpeedCmS = (1 - C.DISTANCE_SMOOTH_ALPHA) * prev.distanceSpeedCmS + C.DISTANCE_SMOOTH_ALPHA * rawDistanceSpeed;
         approachState = classifyApproach(distanceSpeedCmS);
@@ -467,9 +471,11 @@ export class HazardDetector {
       // 單一幀的抖動不能喊「危險」：要連續幾次都判定會撞上才算；快撞上了就少等一點，腳已經出畫面（就在面前）完全不等
       const zoneHits = Number.isFinite(heldTtc) && heldTtc <= C.TTC_DANGER_SEC && inCollisionZone
         ? (prev ? prev.zoneHits : 0) + (isPredicted ? 0 : 1) : 0;
-      const trackedLongEnough = win.length > 1 && win[win.length - 1][0] - win[0][0] >= C.ZONE_MIN_SPAN_SEC;
+      const trackedLongEnough = win.length > 1 && win[win.length - 1][0] - win[0][0]
+        >= (height >= C.ZONE_NEAR_HEIGHT_RATIO * h ? C.ZONE_MIN_SPAN_NEAR_SEC : C.ZONE_MIN_SPAN_SEC);
       const zoneConfirmed = inCollisionZone && (trackedLongEnough || (prev && prev.zoneConfirmed))
-        && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneHits >= (heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_HITS : sidesForTtc.has("bottom") ? 1 : C.ZONE_CONFIRM_HITS_URGENT)
+        && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneHits >= (height < C.ZONE_FAR_HEIGHT_RATIO * h ? C.ZONE_CONFIRM_HITS_FAR
+            : heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_HITS : sidesForTtc.has("bottom") ? 1 : C.ZONE_CONFIRM_HITS_URGENT)
             || (prev && prev.zoneConfirmed && zoneHits > 0));
       const [relativeVx, relativeVy] = relativeVelocity(vx, vy);
       let probability = collisionProbability({

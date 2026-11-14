@@ -429,7 +429,11 @@ test("手機直拿與橫拿的焦距相同", () => {
 test("遠處小目標的面積雜訊不算很快", () => {
   const engine = new AlertEngine(0);
   eq(engine.update([track({ speedLevel: "fast", speedPctS: 70, ttcSec: C.SPEED_ALERT_MAX_TTC_SEC + 1.5 })], 0, false).beep, null);
-  eq(texts(engine.update([track({ speedLevel: "fast", speedPctS: 70, ttcSec: C.SPEED_ALERT_MAX_TTC_SEC - 1 })], 1, false)), ["正前方，行人很快"]);
+  // 朝使用者靠近的「很快」要持續一下才念：真的會撞上時「危險」會先到，不會三句話搶著講；警示音不用等
+  const fast = [track({ speedLevel: "fast", speedPctS: 70, ttcSec: C.SPEED_ALERT_MAX_TTC_SEC - 1 })];
+  const first = engine.update(fast, 1, false);
+  eq(texts(first), []); assert(first.beep);
+  eq(texts(engine.update(fast, 1 + C.SPEED_VOICE_AFTER_SEC, false)), ["正前方，行人很快"]);
 });
 test("預測軌跡：穿過路徑算、往外離開不算", () => {
   assert(A.trajectoryOnCourse(320, 60, 640, 0, Infinity));
@@ -531,16 +535,19 @@ test("不同警報不搶話、沒念到的不會被吃掉", () => {
   assert(other.update([near, fast], C.ALARM_VOICE_MIN_GAP_SEC + 0.1, false, { staticHazards: [hazard()] }).speech.length);
 });
 test("真的警報過才念解除，只念一次，不搶話", () => {
-  const engine = new AlertEngine(0);
-  engine.update([track({ ttcSec: 2, inCollisionZone: true })], 0, false);
-  eq(texts(engine.update([], 1, false)), []);
-  eq(texts(engine.update([], C.ALARM_RELEASE_HOLD_SEC + 0.1, true)), []);
-  // 最後一次「警報還在」是 t=1（語音念完前不算解除），要再等 CLEAR_AFTER_SEC，閃爍時才不會一直解除又警報
-  eq(texts(engine.update([], 1 + C.CLEAR_AFTER_SEC - 0.1, false)), []);
-  const t = 1 + C.CLEAR_AFTER_SEC + 0.1;
+  const engine = new AlertEngine(0), hit = [track({ ttcSec: 2, inCollisionZone: true })];
+  for (const t of [0, 0.6, 1.2]) engine.update(hit, t, false);
+  eq(texts(engine.update([], 2, false)), []);
+  // 最後一次「警報還在」是 t=2，要再等 CLEAR_AFTER_SEC，閃爍時才不會一直解除又警報
+  eq(texts(engine.update([], 2 + C.CLEAR_AFTER_SEC - 0.1, false)), []);
+  const t = 2 + C.CLEAR_AFTER_SEC + 0.1;
   eq(texts(engine.update([], t, false)), [C.CLEAR_TEXT]);
   eq(texts(engine.update([], t + 1, false)), []);
   eq(texts(new AlertEngine(0).update([], 100, false)), []);
+  // 一閃而過的警報（多半是誤判）不用特地說解除
+  const brief = new AlertEngine(0);
+  brief.update(hit, 0, false);
+  for (let u = 0.5; u < 8; u += 0.5) eq(texts(brief.update([], u, false)), []);
 });
 test("目前狀況：最危險的先念、長度有限", () => {
   eq(sceneSummary([]), C.SCENE_EMPTY_TEXT);
@@ -568,7 +575,7 @@ test("跟人說話、排隊：不會一直念，警示音 8 秒後停", () => {
   const log = runFrames(new AlertEngine(0), () => [nearPerson()], 120);
   const times = spokenAt(log, "很近");
   assert(times[0] < 0.2, "第一次要馬上說");
-  assert(times.length <= 6, `兩分鐘念了 ${times.length} 次`);
+  assert(times.length <= C.ALARM_VOICE_MAX_SAYS, `兩分鐘念了 ${times.length} 次`);
   const gaps = times.slice(1).map((v, i) => v - times[i]);
   assert(gaps.every((g, i) => i === 0 || g >= gaps[i - 1] - 0.11), `間隔要愈來愈長：${gaps}`);
   assert(log[50].beep, "剛開始要有警示音");
@@ -981,6 +988,22 @@ test("危險消失：警示音馬上停、念到一半的警報切掉，漏抓�
   const gone = engine.update([], 0.2 + C.BEEP_OFF_HOLD_SEC, true);
   eq(gone.beep, null); assert(gone.hush, "還在念的警報要切掉");
   assert(!engine.update([], 30, true).hush, "很久以後的語音不是警報（例如電量提醒），不能切");
+  // 路徑上還看得到人（判定只是閃斷）：多等一下才切；「停」不切
+  const e2 = new AlertEngine(0), hit = track({ ttcSec: 2.5, inCollisionZone: true });
+  e2.update([hit], 0, false);
+  assert(!e2.update([track()], C.BEEP_OFF_HOLD_SEC + 0.1, true).hush, "對方還在路徑上，不能把危險念到一半切掉");
+  assert(e2.update([track()], C.ALARM_RELEASE_HOLD_SEC + 0.1, true).hush);
+  const e3 = new AlertEngine(0);
+  e3.update([track({ ttcSec: 1, inCollisionZone: true })], 0, false);
+  assert(!e3.update([], 1, true).hush, "「停」要念完");
+});
+
+test("剛看到的遠處小框：框高抖幾個像素不算靠近，也不會喊停", async () => {
+  // 20 公尺外的機車（框高約 42 像素）其實沒在靠近，框高每幀上下抖 3 像素
+  const jitter = [0, 3, -2, 3, 1, 4, -1, 3, 0, 4, 2, 5];
+  const det = new HazardDetector(new FakeCrowd(n => [[300, 300 - 42 - jitter[n % jitter.length], 340, 300]]), null);
+  det.yolo.detect = async function () { return this.boxes(this.calls++).map(box => ({ box, score: 0.9, rawLabel: "motorcycle" })); };
+  for (let i = 0; i < 30; i++) assert(!anyDanger(await det.process(scene, (i + 1) / 10)), `第 ${i} 幀誤判會撞上`);
 });
 
 // ---------- 模型下載：斷線、卡住、不完整都要拿到完整的檔案 ----------

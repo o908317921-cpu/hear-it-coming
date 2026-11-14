@@ -972,6 +972,17 @@ test("交錯：判定在邊緣閃爍時，警示音節奏不會快慢快慢亂�
   eq(engine.update([track({ ttcSec: 1, inCollisionZone: true })], 5.0, false).beep, A.beepPattern("close"));
 });
 
+test("危險消失：警示音馬上停、念到一半的警報切掉，漏抓一幀不算消失", () => {
+  const engine = new AlertEngine(0), near = [nearPerson()];
+  assert(engine.update(near, 0, false).beep);
+  assert(engine.update([], 0.1, true).beep, "只漏抓一幀，警示音不能斷");
+  assert(!engine.update([], 0.1, true).hush);
+  assert(engine.update(near, 0.2, true).beep);
+  const gone = engine.update([], 0.2 + C.BEEP_OFF_HOLD_SEC, true);
+  eq(gone.beep, null); assert(gone.hush, "還在念的警報要切掉");
+  assert(!engine.update([], 30, true).hush, "很久以後的語音不是警報（例如電量提醒），不能切");
+});
+
 // ---------- 模型下載：斷線、卡住、不完整都要拿到完整的檔案 ----------
 const DATA = Uint8Array.from({ length: 1000 }, (_, i) => i % 251);
 function fakeServer(script) {

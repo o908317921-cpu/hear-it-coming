@@ -448,6 +448,7 @@ async function processFrame(now, id) {
   // 分析已暫停時不能繼續響舊的警示音（這一幀可能是暫停前就開始算的）
   audio.beep = (videoFrozen || document.hidden) ? null : update.beep;
   audio.beepPan = update.beepPan;
+  if (update.hush) audio.hush();   // 前方已經沒有危險：念到一半的警報不要再念完
   cameraBlocked = update.cameraBlocked;
   // 「只有嗶聲」模式不念物體警報，光線不足等系統提醒（優先順序 0）照念；「停」攸關安全，一定要念
   // 「警報解除」也不念：這個模式根本沒念過警報

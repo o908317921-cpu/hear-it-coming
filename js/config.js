@@ -238,6 +238,7 @@ export const C = {
   CLEAR_AFTER_SEC: 3.0,           // 警報結束這麼久才念「警報解除」，判定閃爍時不會一直解除又警報
   ALARM_VOICE_MIN_GAP_SEC: 2.0,
   SAME_TEXT_GAP_SEC: 4.0,         // 一模一樣的句子至少隔這麼久才再念（一串人陸續經過時不會一直重複同一句）；「停」不受限
+  BEEP_OFF_HOLD_SEC: 0.3,         // 前方已經沒有東西：這麼久之後警示音就停、念到一半的警報也切掉（只容許漏抓一兩幀）
   BEEP_DOWN_HOLD_SEC: 0.6,        // 警示音變急馬上變，要變緩或停下來得先穩定這麼久，判定在邊緣時才不會快慢快慢亂跳
   ALARM_VOICE_GLOBAL_GAP_SEC: 1.5, // 不同類語音之間至少隔多久，誤報與嘮叨都會讓使用者不再信任警示
   SPEED_ALERT_MAX_TTC_SEC: 3.0,   // 朝使用者靠近的物體要 TTC 也認為快到了才報：遠處小目標的面積雜訊很大

@@ -84,6 +84,8 @@ export class AlertEngine {
     this.lastAnyVoice = -Infinity;
     this.lastSaid = new Map();        // 句子 → 上次念的時間
     this.heldBeep = null;             // 目前的警示音節奏 {level, pan, at}
+    this.lastHazard = -Infinity;      // 最後一次真的看到危險的時間
+    this.lastAlarmSpeech = -Infinity;
     this.alarmSpoken = false;         // 這次危險念過警報，結束時才需要念「警報解除」
     this.darkSince = null;
     this.lastLowLightVoice = -Infinity;
@@ -209,11 +211,13 @@ export class AlertEngine {
       static: [[...staticHazards], h => -h.distanceM, staticLogText, staticAlertText, h => beepLevel(h.distanceM)],
     };
     const waiting = [];               // 這一幀想念的句子，最後只念最緊急的一句
+    const present = {};               // 這一幀真的還看得到的警報（alarmOn 會多留一下，只用來決定要不要重念）
     const hitIds = new Set(ttcHits.filter(tr => this.ttcLastHit.has(tr.trackId)).map(tr => tr.trackId));
     for (const [kind, [redItems, severity, logText, sayText, level]] of Object.entries(alarmSources)) {
       const wasOn = ts - this.alarmLastSeen[kind] <= C.ALARM_RELEASE_HOLD_SEC;
       // 語音播放時警示音會暫停；念完前不算解除，否則短暫的紅色狀態只聽得到一聲
       if (redItems.length || (wasOn && speaking)) this.alarmLastSeen[kind] = ts;
+      present[kind] = redItems.length > 0;
       if (redItems.length) {
         const worst = maxBy(redItems, severity);
         this.alarmPan[kind] = horizontalPan(worst, frameWidth);
@@ -238,19 +242,22 @@ export class AlertEngine {
     if (Object.values(out.alarmOn).some(Boolean)) this.lastAlarmOn = ts;
 
     // 唯一的警示音：在所有響著的警報中挑最急的節奏（同節奏時依語音優先順序）
-    const candidates = AlertEngine.KINDS.filter(k => out.alarmOn[k] && !this.settled(k, ts))
+    // 警示音只跟著「現在還看得到的危險」：東西不在了就停，不等警報解除
+    if (ttcHits.length || AlertEngine.KINDS.some(k => present[k])) this.lastHazard = ts;
+    out.hush = speaking && ts - this.lastHazard >= C.BEEP_OFF_HOLD_SEC && ts - this.lastAlarmSpeech < 5;
+    const candidates = AlertEngine.KINDS.filter(k => present[k] && !this.settled(k, ts))
       .map(k => [this.alarmLevel[k], C.SPEECH_PRIORITY[k], this.alarmPan[k]]);
     if (ttcHits.length) {
       const nearest = minBy(ttcHits, tr => tr.ttcSec);
       candidates.push([nearest.ttcSec <= C.TTC_URGENT_SEC ? "close" : "near", C.SPEECH_PRIORITY.ttc,
                        horizontalPan(nearest, frameWidth)]);
     }
-    // 變急馬上變；要變緩或停下來，得先穩定 BEEP_DOWN_HOLD_SEC。判定在邊緣閃爍時節奏才不會快慢快慢亂跳
+    // 變急馬上變；要變緩得先穩定 BEEP_DOWN_HOLD_SEC，危險消失則 BEEP_OFF_HOLD_SEC 後就停。判定在邊緣閃爍時節奏才不會快慢快慢亂跳
     const best = candidates.length ? maxBy(candidates, c => levelIndex(c[0]) * 100 + c[1]) : null;
     const held = this.heldBeep;
     if (best && (!held || levelIndex(best[0]) >= levelIndex(held.level))) {
       this.heldBeep = { level: best[0], pan: best[2], at: ts };
-    } else if (held && ts - held.at >= C.BEEP_DOWN_HOLD_SEC) {
+    } else if (held && ts - held.at >= (best ? C.BEEP_DOWN_HOLD_SEC : C.BEEP_OFF_HOLD_SEC)) {
       this.heldBeep = best ? { level: best[0], pan: best[2], at: ts } : null;
     } else if (held && best) {
       held.pan = best[2];
@@ -272,6 +279,7 @@ export class AlertEngine {
     }
 
     for (const [text] of out.speech) this.lastSaid.set(text, ts);
+    if (out.speech.length) this.lastAlarmSpeech = ts;
     // 危險結束：只有真的念過警報才說解除
     if (out.speech.length) {
       this.alarmSpoken = true;

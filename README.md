@@ -189,6 +189,8 @@ tests/
   index.html          自動測試頁
   tests.js            測試內容
   bus.png             測試用照片
+  video.html          影片逐幀分析：實拍影片 → CSV（實驗一、二、三、六）
+  field.html          真實照片測試（紅綠燈、地面高低差、斑馬線）
 ```
 
 模型用 [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/) 執行：手機支援 WebGPU 時用顯示晶片加速，不支援時用 CPU（WASM）。
@@ -198,6 +200,11 @@ tests/
 ## 測試
 啟動網站後開啟 `/tests/index.html`，會執行 90 多項自動測試（距離／速度分級、TTC、警報規則、深度圖障礙、晃動補償、追蹤器、設定檔驗證，以及依作品說明書驗證的：正面走來一定判定會撞上、錯身與遠處橫越不出聲、TTC 回歸沒有落後、截斷補償、「危險→停」升級、不搶話、直拿手機的焦距、預測幀不算樣本）。
 網址加上 `?model=1`（例如 `https://localhost:8444/tests/index.html?model=1`）會再用真實模型辨識公車照片，確認能找到行人與公車、漏抓後追蹤編號不變。
+
+### 用目前的手機版重跑報告實驗
+開啟 `/tests/video.html`，選一段胸前手機錄的影片，會用手機版同一套辨識與警報規則一幀一幀跑完（時間以影片計算，不受電腦快慢影響），匯出「每幀物體.csv」（每個物體的 TTC、是否在路徑上、警示等級、方向）與「警報.csv」（每一句警報與警示音的開始／停止）。
+- 實驗三（消融）：設定欄填 `{"ABLATE_TRACKER":true}`（ByteTrack → 框重疊率貪婪配對）、`{"ABLATE_LANDING":true}`（不看預測落點）、`{"ABLATE_GMC":true}`（配對前不扣鏡頭轉動）或 `{"CAMERA_MOTION_MODE":"flow"}`（不用陀螺儀；影片本來就沒有陀螺儀資料）。
+- 實驗六（YOLO 設定）：`{"INFERENCE_SIZE":448}`、`{"DETECTION_INTERVAL":3}`、`{"MODEL_URL":"../models/yolo11n-seg.onnx","INFERENCE_SIZE":448}`。打錯設定名稱會直接報錯，不會默默沒效果。
 
 ### 情境模擬結果（2026-11-04，最終版）
 真人去背後依針孔相機幾何合成影片，用無頭 Chrome 的假鏡頭跑完整流程（WebGPU，電腦的速度，不代表手機）；語音發出當下從畫面讀幀編號，換算真實的「離撞上還有幾秒」。每個情境重複 4～6 次，範圍是最小值～最大值。**這是合成影像，只能抓程式錯誤，不能取代實地測試，也不是報告的實驗數據。**

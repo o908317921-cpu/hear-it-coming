@@ -1336,6 +1336,16 @@ test("實測紀錄：誤報標記、漏報、摘要、CSV", () => {
   eq(sum.ttc["危險"], { n: 1, mean: 2.3 }, "碰撞時間統計");
   eq(sum.ttc["停"], { n: 0, mean: null });
 });
+test("實測紀錄：效能取樣（實驗四）", () => {
+  const log = new FieldLog(memoryStorage());
+  eq(log.perf({ fps: 12, ms: 80, yolo: "webgpu", depth: true }), null);   // 還沒開始不記
+  log.start();
+  log.perf({ fps: 12.04, ms: 80.4, yolo: "webgpu", depth: true });
+  log.perf({ fps: 9.96, ms: 99.6, yolo: "webgpu", depth: false });
+  const sum = log.summary();
+  eq([sum.perfSamples, sum.fps, sum.frameMs], [2, 11, 90]);
+  assert(log.csv().includes(",效能,,,,,,,,12,,80,webgpu,開"), log.csv());
+});
 
 export async function run(log, withModel) {
   let failed = 0;

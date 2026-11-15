@@ -57,13 +57,14 @@ function savePrefs() {
   document.body.classList.toggle("logging", !!prefs.fieldlog);
   const sum = fieldlog.summary();
   const ttcText = Object.entries(sum.ttc).filter(([, v]) => v.n).map(([k, v]) => `「${k}」${v.n} 次平均剩 ${v.mean} 秒`).join("、");
-  $("logSummary").textContent = sum.alerts || sum.misses
+  $("logSummary").textContent = sum.alerts || sum.misses || sum.perfSamples
     ? `已記錄 ${sum.sessions} 場、約 ${sum.minutes} 分鐘：警報 ${sum.alerts} 句，標記誤報 ${sum.falseAlarms} 句（${sum.falseRate ?? 0}%），漏報 ${sum.misses} 次。`
       + (ttcText ? `碰撞警報發出時：${ttcText}。` : "")
+      + (sum.perfSamples ? `平均每秒 ${sum.fps} 幀、每幀 ${sum.frameMs} ms（${sum.perfSamples} 次取樣）。` : "")
     : prefs.fieldlog ? "實測紀錄開啟：每句警報都會記在這支手機裡，偵測時可以按「標記誤報」「標記漏報」。" : "";
 }
 const fieldlog = new FieldLog();
-let fpsCount = 0, fpsT = performance.now(), fps = 0;
+let fpsCount = 0, fpsT = performance.now(), fps = 0, lastPerfLog = 0;
 const shownWarnings = new Set();
 
 // ---------- 陀螺儀：鏡頭轉動造成的畫面位移，從物體速度中扣掉 ----------
@@ -501,6 +502,11 @@ async function processFrame(now, id) {
   fpsCount++;
   const t = performance.now();
   if (t - fpsT >= 1000) { fps = fpsCount * 1000 / (t - fpsT); fpsCount = 0; fpsT = t; }
+  // 實驗四：實測紀錄開著時，每 FIELDLOG_PERF_SEC 秒記一次幀率與每幀耗時
+  if (prefs.fieldlog && fps > 0 && t - lastPerfLog >= C.FIELDLOG_PERF_SEC * 1000) {
+    fieldlog.perf({ fps, ms: procMs, yolo: yolo.backend, depth: !!depth?.ready });
+    lastPerfLog = t;
+  }
   const motion = { gyro: "陀螺儀", flow: "背景比對", "gyro+flow": "陀螺儀＋背景比對" }[detector.cameraMotion.source];
   $("stats").textContent = `${fps.toFixed(1)} FPS · 每幀 ${procMs.toFixed(0)} ms · YOLO ${yolo.backend.toUpperCase()} `
     + `${detector.lastDetectMs.toFixed(0)} ms · ${depthStatus()}` + (motion ? ` · 晃動補償：${motion}` : "");

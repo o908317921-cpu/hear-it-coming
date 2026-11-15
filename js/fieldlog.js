@@ -45,6 +45,12 @@ export class FieldLog {
     });
   }
 
+  // 實驗四（運算成本）：每隔一段時間記一次效能，安靜沒有警報的時候也有數據
+  perf({ fps, ms, yolo, depth }) {
+    if (!this.session) return null;
+    return this.push({ type: "perf", fps: fixed(fps), ms: fixed(ms, 0), engine: yolo, depth: depth ? "開" : "關" });
+  }
+
   // which："false"（剛才那句是誤報）或 "miss"（剛才有危險但沒有警報）；回傳要念的確認句
   mark(which) {
     if (!this.session) return "還沒開始偵測，沒有記錄";
@@ -75,13 +81,16 @@ export class FieldLog {
       const v = alerts.filter(e => e.kind === tier && e.flag !== "false" && Number.isFinite(e.ttc)).map(e => e.ttc);
       ttc[tier] = { n: v.length, mean: v.length ? fixed(v.reduce((a, b) => a + b, 0) / v.length) : null };
     }
+    const perf = this.events.filter(e => e.type === "perf" && Number.isFinite(e.fps));
+    const avg = k => perf.length ? fixed(perf.reduce((a, e) => a + e[k], 0) / perf.length, k === "ms" ? 0 : 1) : null;
     return { sessions: span.size, minutes: fixed(minutes), alerts: alerts.length, falseAlarms: falses, misses,
-             falseRate: alerts.length ? fixed(falses / alerts.length * 100) : null, ttc };
+             falseRate: alerts.length ? fixed(falses / alerts.length * 100) : null, ttc,
+             fps: avg("fps"), frameMs: avg("ms"), perfSamples: perf.length };
   }
 
   csv() {
-    const head = ["時間", "場次", "類型", "警報種類", "內容", "物體", "方向", "TTC秒", "距離公尺", "已追蹤秒", "FPS", "標記"];
-    const type = { start: "開始", stop: "停止", alert: "警報", miss: "漏報" };
+    const head = ["時間", "場次", "類型", "警報種類", "內容", "物體", "方向", "TTC秒", "距離公尺", "已追蹤秒", "FPS", "標記", "每幀毫秒", "辨識引擎", "深度模型"];
+    const type = { start: "開始", stop: "停止", alert: "警報", miss: "漏報", perf: "效能" };
     const cell = v => {
       const s = v == null ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -91,7 +100,7 @@ export class FieldLog {
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     };
     const rows = this.events.map(e => [time(e.t), e.s, type[e.type] || e.type, e.kind, e.text, e.obj, e.dir,
-      e.ttc, e.dist, e.age, e.fps, e.flag === "false" ? "誤報" : ""]);
+      e.ttc, e.dist, e.age, e.fps, e.flag === "false" ? "誤報" : "", e.ms, e.engine, e.depth]);
     return "﻿" + [head, ...rows].map(r => r.map(cell).join(",")).join("\r\n");   // BOM：Excel 才認得中文
   }
 

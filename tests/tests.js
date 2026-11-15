@@ -1223,10 +1223,11 @@ test("紅綠燈顏色", () => {
 });
 
 // 路面：下半部畫橫條（white 時是白漆，否則是 color 色的漆）
-function roadRGBA(stripeRows, { w = 320, h = 240, color = [210, 210, 210] } = {}) {
+// road(y)：路面亮度（預設固定的深灰柏油）
+function roadRGBA(stripeRows, { w = 320, h = 240, color = [210, 210, 210], road = () => 70 } = {}) {
   const a = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const c = y >= h * 0.45 && stripeRows(y) ? color : [70, 70, 72];
+    const g = road(y), c = y >= h * 0.45 && stripeRows(y) ? color : [g, g, g + 2];
     a.set([...c, 255], (y * w + x) * 4);
   }
   return a;
@@ -1244,6 +1245,12 @@ test("斑馬線：好幾條寬扁、越近越粗的白色橫條", () => {
   const vertical = new Uint8ClampedArray(320 * 240 * 4);                                    // 直條紋（欄杆影子）
   for (let i = 0; i < 320 * 240; i++) vertical.set(Math.floor((i % 320) / 10) % 2 ? [210, 210, 210, 255] : [70, 70, 72, 255], i * 4);
   eq(crosswalkStripes(vertical, 320, 240, 160), 0);
+});
+test("斑馬線：晴天路面越近越亮時仍認得斑馬線，只有亮的路面不算", () => {
+  // 防護用：改成「比上下附近亮」之後，亮度漸變的路面不能被當成白漆。真正的改善要看真實照片（tests/field.html）
+  const sunny = y => Math.round(90 + 125 * Math.max(0, y - 108) / (240 - 108));
+  assert(crosswalkStripes(roadRGBA(zebra, { road: sunny, color: [235, 235, 235] }), 320, 240, 160) >= C.CROSSWALK_MIN_STRIPES);
+  eq(crosswalkStripes(roadRGBA(() => false, { road: sunny }), 320, 240, 160), 0);   // 只有越來越亮的路面，沒有斑馬線
 });
 test("燈號：連續看到才說，改變時馬上說，不重複", () => {
   const cues = new SceneCues();

@@ -338,7 +338,11 @@ export const C = {
   CROSSWALK_WIDTH_RATIO: 0.6,
   CROSSWALK_MIN_CONTRAST: 45,     // 亮處與暗處的亮度差
   CROSSWALK_MAX_SAT: 0.25,        // 白漆不鮮豔
-  CROSSWALK_MIN_WIDTH_RATIO: 0.2, // 一條白漆至少有看的範圍這麼寬
+  CROSSWALK_LOCAL: true,          // 白漆要比同一欄上下附近的路面亮（見 scene.js crosswalkStripes）
+  CROSSWALK_LOCAL_RADIUS: 0.15,   // 上下各看「看的範圍高度 × 這個比例」
+  CROSSWALK_LOCAL_MARGIN: 0.2,    // 至少比附近平均亮這麼多（× 整塊的亮暗差）
+  CROSSWALK_LOCAL_FLOOR: 0.4,     // 而且本身不能太暗（× 整塊的亮暗差）
+  CROSSWALK_MIN_WIDTH_RATIO: 0.15, // 一條白漆至少有看的範圍這麼寬（改用上下比較亮度後從 0.2 放寬，真實照片多認出 1 張、誤報不變）
   CROSSWALK_MAX_ASPECT: 0.35,     // 而且要扁（高不到寬的這個比例）
   CROSSWALK_MIN_STRIPES: 3,       // 而且這幾條要符合透視：由上往下每條都比上一條粗、寬度差不到 2 倍
   CROSSWALK_GROW_MIN: 1.05,

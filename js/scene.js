@@ -212,7 +212,8 @@ export function pickLight(lights) {
 // 真實照片實測：「每一欄亮暗交錯」連樓梯、磚牆、樹影都算；「整列都亮」又抓不到斜的斑馬線。
 // 改成找白漆：夠亮、不鮮豔，連成一塊後要夠寬、夠扁，而且好幾塊上下疊著。
 // rgba：畫面像素；回傳符合透視規律的白色橫條數（≥ CROSSWALK_MIN_STRIPES 才算斑馬線）
-export function crosswalkStripes(rgba, w, h, pathCenterX) {
+// dbg（選用）：記下每一關的結果，測試頁用來看漏掉的照片卡在哪一關
+export function crosswalkStripes(rgba, w, h, pathCenterX, dbg = null) {
   const half = w * C.CROSSWALK_WIDTH_RATIO / 2;
   const x0 = Math.floor(Math.max(0, pathCenterX - half)), x1 = Math.floor(Math.min(w, pathCenterX + half));
   const y0 = Math.floor(h * C.CROSSWALK_TOP_RATIO);
@@ -228,10 +229,25 @@ export function crosswalkStripes(rgba, w, h, pathCenterX) {
   }
   const pct = q => { let acc = 0; for (let v = 0; v < 256; v++) if ((acc += hist[v]) >= q * bw * bh) return v; return 255; };
   const lo = pct(0.2), hi = pct(0.9);
+  if (dbg) Object.assign(dbg, { contrast: hi - lo });
   if (hi - lo < C.CROSSWALK_MIN_CONTRAST) return 0;
   const cut = lo + 0.6 * (hi - lo);
   let mask = new Uint8Array(bw * bh);
-  for (let i = 0; i < mask.length; i++) mask[i] = val[i] > cut && sat[i] < C.CROSSWALK_MAX_SAT ? 1 : 0;
+  if (C.CROSSWALK_LOCAL) {
+    // 白漆要比「同一欄上下附近」的路面亮：只用整塊的亮度門檻時，晴天淺色的路面整片都算白，
+    // 條紋全部黏成一大塊（真實照片漏掉的斑馬線大多是這樣）。斑馬線是橫條，上下附近一定有暗的路面
+    const r = Math.max(8, Math.round(bh * C.CROSSWALK_LOCAL_RADIUS)), floor = lo + C.CROSSWALK_LOCAL_FLOOR * (hi - lo);
+    const margin = C.CROSSWALK_LOCAL_MARGIN * (hi - lo), col = new Float64Array(bh + 1);
+    for (let x = 0; x < bw; x++) {
+      for (let y = 0; y < bh; y++) col[y + 1] = col[y] + val[y * bw + x];
+      for (let y = 0; y < bh; y++) {
+        const a = Math.max(0, y - r), b = Math.min(bh, y + r + 1), i = y * bw + x;
+        mask[i] = val[i] > floor && val[i] > (col[b] - col[a]) / (b - a) + margin && sat[i] < C.CROSSWALK_MAX_SAT ? 1 : 0;
+      }
+    }
+  } else {
+    for (let i = 0; i < mask.length; i++) mask[i] = val[i] > cut && sat[i] < C.CROSSWALK_MAX_SAT ? 1 : 0;
+  }
   // 先侵蝕再膨脹（3×3）：去掉零星的亮點與細線
   const morph = (src, erode) => {
     const dst = new Uint8Array(src.length);
@@ -264,6 +280,7 @@ export function crosswalkStripes(rgba, w, h, pathCenterX) {
       }
     }
     const ww = maxX - minX + 1, hh = maxY - minY + 1;
+    if (dbg && ww * hh >= 50) (dbg.blobs ??= []).push([minY, ww, hh]);
     if (ww >= C.CROSSWALK_MIN_WIDTH_RATIO * bw && hh <= C.CROSSWALK_MAX_ASPECT * ww && hh >= 2) stripes.push([(minY + maxY) / 2, hh, ww]);
   }
   // 上下疊著：中心至少差上一條的高度（同一條被切成兩塊不重複算）
@@ -272,6 +289,7 @@ export function crosswalkStripes(rgba, w, h, pathCenterX) {
   for (const st of stripes) if (!layers.length || st[0] - layers[layers.length - 1][0] > Math.max(3, layers[layers.length - 1][1] * 0.8)) layers.push(st);
   // 透視規律（盲測照片找到的）：真的斑馬線越近越粗、寬度差不多；樓梯、路面邊線、人行道邊緣的白色塊大小亂跳。
   // 回傳最長的一串「由上往下每一條都比上一條粗、寬度差不到 2 倍」的白條數
+  if (dbg) Object.assign(dbg, { stripes: stripes.length, layers: layers.map(l => [Math.round(l[0]), l[1], l[2]]) });
   let best = layers.length ? 1 : 0, run = 1;
   for (let i = 1; i < layers.length; i++) {
     const [, h0, w0] = layers[i - 1], [, h1, w1] = layers[i];

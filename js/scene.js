@@ -145,7 +145,9 @@ export function pedestrianSignals(rgba, w, h, debug = null) {
           if (mx / 255 < minV) continue;
           const mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
           if ((mx ? (mx - mn) / mx : 0) < minS) continue;
-          const hue = hsv(R, G, B)[0];
+          const d = mx - mn;   // 色相的算法與 hsv() 一樣，直接寫在這裡省掉每個像素建陣列
+          let hue = d === 0 ? 0 : mx === R ? 60 * (((G - B) / d) % 6) : mx === G ? 60 * ((B - R) / d + 2) : 60 * ((R - G) / d + 4);
+          hue = (hue + 360) % 360;
           if (hue >= 130 && hue < 200) g++;      // 台灣的小綠人偏青色
           else if (hue >= 20 && hue < 45) r++;    // 倒數數字是橘色
         }

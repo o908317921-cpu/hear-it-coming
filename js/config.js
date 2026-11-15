@@ -166,7 +166,9 @@ export const C = {
   TRAJECTORY_WINDOW_SEC: 1.0,
   TRAJECTORY_MIN_FRAMES: 3,
   TTC_MAX_CLAMP_SEC: 10,
+  // 三級警示：TTC_DANGER_SEC 內「注意」→ TTC_WARN_SEC 內「危險」→ TTC_URGENT_SEC 內「停」
   TTC_DANGER_SEC: 3.0,
+  TTC_WARN_SEC: 2.4,
   TTC_URGENT_SEC: 1.8,            // TTC 降至此值以下：語音改成「停」，警示音變長音。實測從這裡到語音發出約晚 0.3 秒，實際約剩 1.5 秒
   TTC_RELEASE_SEC: 1.0,           // 判定短暫閃斷多久內不算重新靠近，避免同一個人被一直喊「危險」
   // 以預測軌跡為主：外推後不在行走路徑上的物體，距離與速度風險打折，也不發「過近／速度過快」警報
@@ -177,11 +179,14 @@ export const C = {
   TTC_HOLD_FRAMES: 6,
   LOOMING_MIN_GROWTH_PX: 8,       // 回歸的時間窗內框高至少要長大這麼多像素（或下面的比例，取大者）才算靠近：比這個小就是抖動
   LOOMING_MIN_GROWTH_RATIO: 0.05,
+  GROWTH_MAX_LOOMING_RATIO: 3.0,  // 面積變化率最多算到「框高成長率」的這麼多倍（真的靠近時是 2 倍）：框高沒在長大、只有面積跳動，是遮擋或框錯，不算「很快」
   LOOMING_MIN_WIDTH_SHARE: 0.25,  // 框寬的成長率連框高的這個比例都不到，不算靠近
   TRUNCATED_NEAR_MIN_HEIGHT: 0.25, // 腳被切掉的物體，框至少有畫面這麼高才算偏近（鏡頭上仰時最下緣露出的一顆頭不算）
   OCCLUDED_OVERLAP_RATIO: 0.2,    // 框有這麼多被「站得更前面的物體」蓋住：看到的大小不可信，不拿來估靠近速度
-  SCALE_JUMP_BASE: 0.15,          // 框高的 |ln(新/舊)| 超過 基準 + 每秒 × 間隔：不是真的靠近（追蹤換人、從遮擋後出現），舊軌跡作廢
+  SCALE_JUMP_BASE: 0.06,          // 框高的 |ln(新/舊)| 超過 基準 + 每秒 × 間隔：不是真的靠近（追蹤換人、從遮擋後出現），舊軌跡作廢
   SCALE_JUMP_PER_SEC: 1.2,
+  WIDTH_JUMP_BASE: 0.3,           // 框寬的容許值比較鬆：走路時雙腿開合，框寬本來就會變
+  SCALE_JUMP_CONFIRM: 3,          // 連續這麼多次都跳變才相信是真的變了；之前的跳變樣本直接丟掉
   TTC_CLIPPED_HOLD_SEC: 3.0,      // 物體大到上下都超出畫面時已經量不到靠近速度：照最後的 TTC 倒數最多這麼久
   COLLISION_ZONE_RATIO: 0.35,
   // 腳底向量：落地點換算到地面，用地面上的相對速度向量判斷會不會撞上（斜向走來、交錯而來的人）
@@ -240,6 +245,7 @@ export const C = {
   ALARM_RELEASE_HOLD_SEC: 1.5,
   ALARM_VOICE_REPEAT_SEC: 5.0,    // 物體持續紅色時，第一次重複提醒的間隔；之後每次加倍
   ALARM_VOICE_REPEAT_MAX_SEC: 60.0, // 重複提醒的間隔上限：站著排隊、跟人說話時不能一直念
+  ALARM_MIN_TRACK_AGE_SEC: 0.4,   // 物體至少被追蹤這麼久才報「很近／很快」（「危險／停」另有自己的確認）
   ALARM_VOICE_MAX_SAYS: 2,        // 同一個近物沒有更靠近時最多念這麼多次（第一次＋提醒一次）；又靠近或換了物體會重新算
   ALARM_SETTLED_SEC: 8.0,         // 同一個近物持續這麼久都沒有更靠近，就停掉警示音（語音仍會偶爾提醒）
   ALARM_PROGRESS_M: 0.3,          // 比這次警報中的最近距離再近這麼多，才算「又靠近了」，警示立刻恢復
@@ -247,7 +253,6 @@ export const C = {
   ALARM_VOICE_MIN_GAP_SEC: 2.0,
   SAME_TEXT_GAP_SEC: 4.0,         // 一模一樣的句子至少隔這麼久才再念（一串人陸續經過時不會一直重複同一句）；「停」不受限
   BEEP_OFF_HOLD_SEC: 0.3,         // 前方已經沒有東西：這麼久之後警示音就停、念到一半的警報也切掉（只容許漏抓一兩幀）
-  SPEED_VOICE_AFTER_SEC: 0.5,     // 「很快」（朝使用者靠近）要持續這麼久才念：真的會撞上時「危險」會先到，不要三句話搶著講
   CLEAR_MIN_ALARM_SEC: 1.0,       // 危險至少持續這麼久，結束時才念「警報解除」；一閃而過的不用特地解除
   BEEP_DOWN_HOLD_SEC: 0.6,        // 警示音變急馬上變，要變緩或停下來得先穩定這麼久，判定在邊緣時才不會快慢快慢亂跳
   ALARM_VOICE_GLOBAL_GAP_SEC: 1.5, // 不同類語音之間至少隔多久，誤報與嘮叨都會讓使用者不再信任警示
@@ -255,7 +260,11 @@ export const C = {
   TOP_SCALE_MIN_PX: 30.0,         // 頭頂高於地平線至少這麼多像素，才用它當截斷時的尺度
   SPEED_ALERT_MAX_M: 8.0,         // 橫越的物體距離超過這個值不報（遠處橫越的車不會撞到人）
   SPEECH_RATE: 1.1,               // 瀏覽器語音速度（1 為正常）
+  TTC_NOTICE_TEXT: "注意，{dir}{obj}",
   TTC_ALERT_TEXT: "危險，{dir}{obj}",
+  TTC_ALERT_SHORT_TEXT: "危險",       // 已經念過「注意，某方向某物」之後升級，只念一個詞
+  TTC_URGENT_SHORT_TEXT: "停",
+  TTC_ESCALATE_MIN_GAP_SEC: 0.8,  // 「注意」念出後至少隔這麼久才升級成「危險」；「停」不受限
   PROXIMITY_ALERT_TEXT: "{obj}很近",
   SPEED_ALERT_TEXT: "{obj}很快",
   LATERAL_ALERT_TEXT: "{obj}橫越",
@@ -274,7 +283,7 @@ export const C = {
     near: [120, 200],
     close: [450, 30],
   },
-  SPEECH_PRIORITY: { info: 0, speed: 1, proximity: 2, static: 2, ttc: 3, urgent: 4 },
+  SPEECH_PRIORITY: { info: 0, speed: 1, proximity: 2, static: 2, notice: 2.5, ttc: 3, urgent: 4 },
 
   // ---------- 低幀率提醒 ----------
   MIN_SAFE_FPS: 3.0,
@@ -305,6 +314,8 @@ export const C = {
 
   // ---------- 顏色 ----------
   LEVEL_COLORS: { GREEN: "#3CC850", ORANGE: "#FF8C00", RED: "#E53935" },
+  // 畫面上的框：綠＝安全，黃＝注意，橙＝危險（或擋在路上很近），紅＝停
+  ALERT_COLORS: { SAFE: "#3CC850", NOTICE: "#FFD400", DANGER: "#FF8C00", STOP: "#E53935" },
   STATIC_HAZARD_COLOR: "#9C5CD6",
 
   DIRECTION_TEXT: { left: "左前方", center: "正前方", right: "右前方" },

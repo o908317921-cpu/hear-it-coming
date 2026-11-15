@@ -319,7 +319,12 @@ export class HazardDetector {
       const height = Math.max(1, y2 - y1);
       let distanceSpeedCmS = 0, approachState = "stable";
       let smoothSpeed, growthRefArea, growthRefTime, debounceCnt, prevState, usedArea, displayMask;
-      let stableArea, stableMask, trajHistory, lastSeen, maskRejects = 0;
+      let stableArea, stableMask, trajHistory, lastSeen, maskRejects = 0, jumpCount = prev ? prev.jumpCount : 0, skipSample = false;
+      // 框的大小跟上一次差太多（高或寬）：多半是這一幀框錯了，面積、距離分級也不能照這一幀算
+      const lastSample = prev && !isPredicted ? prev.trajHistory[prev.trajHistory.length - 1] : null;
+      const allowed = C.SCALE_JUMP_PER_SEC * (lastSample ? now - lastSample[0] : 0);
+      const jumped = !!lastSample && (Math.abs(Math.log(height / Math.max(1, lastSample[3]))) > C.SCALE_JUMP_BASE + allowed
+        || Math.abs(Math.log((x2 - x1) / Math.max(1, lastSample[4]))) > C.WIDTH_JUMP_BASE + allowed);
 
       if (!prev) {
         smoothSpeed = 0;
@@ -335,7 +340,7 @@ export class HazardDetector {
         // 視為分割雜訊（例如頭髮邊界抖動），沿用上一次穩定的遮罩形狀與面積。
         const areaRatio = det.realArea / Math.max(1, prev.stableArea);
         const abruptJump = areaRatio > 1 + C.MASK_STABILITY_JUMP_RATIO || areaRatio < 1 - C.MASK_STABILITY_JUMP_RATIO;
-        let trust = maskReliable && !(abruptJump && !motionBlurConfirmed);
+        let trust = maskReliable && !(abruptJump && !motionBlurConfirmed) && !jumped;
         maskRejects = prev.maskRejects;
         if (!isPredicted) {
           if (!trust && maskRejects < C.MASK_MAX_REJECTS) maskRejects++;
@@ -369,11 +374,13 @@ export class HazardDetector {
         && other.box[3] > y2 + 4 && overlapRatio(det.box, other.box) > C.OCCLUDED_OVERLAP_RATIO);
       if (!isPredicted && !occludedByFront) {
         const last = trajHistory[trajHistory.length - 1];
-        if (last && Math.abs(Math.log(height / Math.max(1, last[3]))) > C.SCALE_JUMP_BASE + C.SCALE_JUMP_PER_SEC * (now - last[0])) {
-          trajHistory = [];
-        }
+        // 框的大小跟上一次差太多：多半是這一幀框錯了（兩個人被框成一個、只框到半個人），這個樣本不要。
+        // 連續好幾次都這樣才是真的變了（追蹤換了人、從遮擋後走出來）：舊軌跡作廢，從這裡重新開始
+        jumpCount = jumped ? (prev ? prev.jumpCount : 0) + 1 : 0;
+        if (jumpCount >= C.SCALE_JUMP_CONFIRM) { trajHistory = []; jumpCount = 0; }
+        skipSample = jumped && trajHistory.length > 0;
         const sidesNow = truncationSides(det.box, w, h);
-        trajHistory = trajHistory.concat([[now, footX - motion.offsetX, footY - motion.offsetY, height, x2 - x1,
+        if (!skipSample) trajHistory = trajHistory.concat([[now, footX - motion.offsetX, footY - motion.offsetY, height, x2 - x1,
                                            h / 2 + motion.offsetY - y1, sidesNow.has("left") || sidesNow.has("right"),
                                            sidesNow.has("bottom"), sidesNow.has("top")]])
           .slice(-C.TRAJECTORY_HISTORY_LEN);
@@ -519,7 +526,8 @@ export class HazardDetector {
       else state = "GREEN";
 
       // 速度 = 「朝鏡頭靠近」與「橫向穿越行走路徑」兩者取大者
-      const growthPctS = smoothSpeed * 100;
+      // 面積變大要有框高成長佐證：人多時面積會因為遮擋、兩人被框成一個而亂跳，遠處的人就被說成「很快」
+      const growthPctS = Math.min(smoothSpeed * 100, C.GROWTH_MAX_LOOMING_RATIO * Math.max(dhDt, 0) / height * 100);
       const latRate = lateralRate(relativeVx, footX, w, height, C.COLLISION_ZONE_RATIO, pathCenterX);
       const lateralPct = lateralToSpeedPct(latRate);
       const speedPctS = Math.max(growthPctS, lateralPct);
@@ -530,6 +538,7 @@ export class HazardDetector {
       let proximityLevel = classifyProximity(levelRatio, prev ? prev.proximityLevel : null, proximityScale);
       if (C.TRUNCATED_BOTTOM_MIN_ORANGE && truncated.has("bottom") && proximityLevel === "GREEN"
           && height >= C.TRUNCATED_NEAR_MIN_HEIGHT * h) proximityLevel = "ORANGE";
+      if (jumped && prev) proximityLevel = prev.proximityLevel;   // 框錯的那一幀不改距離分級
       const speedLevel = classifyGrowth(speedPctS, prev ? prev.speedLevel : null);
       // 以預測軌跡為主：沿軌跡外推後不在行走路徑上、或正在遠離的物體，距離與速度風險打折
       const receding = dhDt <= -Math.max(C.MIN_DH_DT_FOR_TTC, C.RECEDING_MIN_RATE * height);
@@ -544,7 +553,7 @@ export class HazardDetector {
         trajHistory, distanceSpeedCmS, mask: displayMask, vx, vy, blurScore: det.blurScore,
         isBlurry: det.isBlurry, elongation: det.elongation, maskQuality: det.maskQuality,
         ttcSec: heldTtc, ttcHoldCount: holdCount, ttcTime: now, ttcMeasuredAt, proximityLevel, speedLevel, depthM, depthTime,
-        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneConfirmed, groundCourse,
+        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneConfirmed, groundCourse, jumpCount, firstSeen: prev ? prev.firstSeen : now,
       });
 
       results.push({
@@ -554,7 +563,7 @@ export class HazardDetector {
         speedPctS, speedSource, speedLevel, ttcSec: heldTtc, predictedPoint, inCollisionZone: zoneConfirmed, onCourse,
         collisionProbability: probability, predictedOffsetPx: predictedPoint[0] - pathCenterX,
         vx, vy, relativeVx, relativeVy, distanceCm: fusedM * 100, distanceSpeedCmS, approachState, proximityLevel,
-        isPredicted, distanceM: fusedM, occluded, truncated: [...truncated].sort(),
+        isPredicted, ageSec: now - (prev ? prev.firstSeen : now), distanceM: fusedM, occluded, truncated: [...truncated].sort(),
         ttcSource, groundVector: ground && { x: ground.x, z: ground.z, vx: ground.vx, vz: ground.vz, missM: ground.missM },
       });
     }

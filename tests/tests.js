@@ -2,7 +2,7 @@
 // 開啟 tests/index.html 即可執行；加上 ?model=1 會再用真實模型跑公車照片的整合測試。
 import { C, applyUserSettings, classLabel, targetClassIds, COCO_NAMES } from "../js/config.js";
 import * as A from "../js/analysis.js";
-import { AlertEngine, sceneSummary } from "../js/alerts.js";
+import { AlertEngine, alertLevelOf, sceneSummary } from "../js/alerts.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
 import { ByteTracker } from "../js/tracker.js";
@@ -112,7 +112,7 @@ test("警示音方向跟著物體", () => {
 test("即將撞上：每次靠近只報一次、優先權最高", () => {
   const engine = new AlertEngine(0);
   const hit = [track({ ttcSec: 2.5, inCollisionZone: true })];
-  eq(engine.update(hit, 0, false).speech, [["危險，正前方行人", C.SPEECH_PRIORITY.ttc]]);
+  eq(engine.update(hit, 0, false).speech, [["注意，正前方行人", C.SPEECH_PRIORITY.notice]]);
   eq(engine.update(hit, 0.5, false).speech, []);
   engine.update([], 1, false);
   assert(engine.update(hit, 5, false).speech.length);
@@ -256,7 +256,7 @@ test("靜態障礙：簡短語音＋警示音，越近越急", () => {
 test("同時只有一種聲音、一句語音", () => {
   const engine = new AlertEngine(0);
   const nearPerson = track({ trackId: 1, proximityLevel: "RED", distanceM: 1.5, horizontalPosition: "left", box: [0, 100, 120, 400] });
-  const fastBike = track({ trackId: 2, label: "機車", rawLabel: "motorcycle", speedLevel: "fast", speedPctS: 90,
+  const fastBike = track({ trackId: 2, label: "機車", rawLabel: "motorcycle", speedLevel: "fast", speedSource: "lateral", speedPctS: 90,
     distanceM: 4, ttcSec: 2, horizontalPosition: "right", box: [520, 100, 640, 400] });
   let u = engine.update([nearPerson, fastBike], 0, false, { staticHazards: [hazard(0.8)] });
   assert(AlertEngine.KINDS.every(k => u.alarmOn[k]));
@@ -426,14 +426,13 @@ test("手機直拿與橫拿的焦距相同", () => {
   eq(A.focalPx(480, 640), C.CAMERA_FOCAL_LENGTH_PX);
   eq(A.focalPx(640, 480), C.CAMERA_FOCAL_LENGTH_PX);
 });
-test("遠處小目標的面積雜訊不算很快", () => {
+test("朝使用者靠近的「很快」不另外報：那就是注意／危險／停", () => {
   const engine = new AlertEngine(0);
-  eq(engine.update([track({ speedLevel: "fast", speedPctS: 70, ttcSec: C.SPEED_ALERT_MAX_TTC_SEC + 1.5 })], 0, false).beep, null);
-  // 朝使用者靠近的「很快」要持續一下才念：真的會撞上時「危險」會先到，不會三句話搶著講；警示音不用等
-  const fast = [track({ speedLevel: "fast", speedPctS: 70, ttcSec: C.SPEED_ALERT_MAX_TTC_SEC - 1 })];
-  const first = engine.update(fast, 1, false);
-  eq(texts(first), []); assert(first.beep);
-  eq(texts(engine.update(fast, 1 + C.SPEED_VOICE_AFTER_SEC, false)), ["正前方，行人很快"]);
+  const fast = o => [track({ speedLevel: "fast", speedPctS: 70, ...o })];
+  // 只是面積變得很快、沒有判定會撞上（遠處、人多時框亂跳）：不出聲
+  for (let t = 0; t < 3; t += 0.5) { const u = engine.update(fast({ ttcSec: 2 }), t, false); eq(u.speech, []); eq(u.beep, null); }
+  // 真的會撞上：照三級走
+  eq(texts(engine.update(fast({ ttcSec: 2.8, inCollisionZone: true }), 3, false)), ["注意，正前方行人"]);
 });
 test("預測軌跡：穿過路徑算、往外離開不算", () => {
   assert(A.trajectoryOnCourse(320, 60, 640, 0, Infinity));
@@ -458,10 +457,10 @@ test("第二個危險物體不會被吃掉", () => {
   const engine = new AlertEngine(0);
   const person = track({ trackId: 1, ttcSec: 2.5, inCollisionZone: true });
   const bike = track({ trackId: 2, label: "機車", rawLabel: "motorcycle", ttcSec: 2.5, inCollisionZone: true, horizontalPosition: "left" });
-  eq(texts(engine.update([person], 0, false)), ["危險，正前方行人"]);
+  eq(texts(engine.update([person], 0, false)), ["注意，正前方行人"]);
   const spoken = [];
   for (let t = 1; t < 4; t += 0.1) spoken.push(...texts(engine.update([person, bike], t, false)));
-  eq(spoken, ["危險，左前方機車"]);
+  eq(spoken, ["注意，左前方機車"]);
 });
 test("暫停不算慢，真的慢才提醒", () => {
   const engine = new AlertEngine();
@@ -505,32 +504,51 @@ test("最近的物體優先，不是佔畫面最大的", () => {
   eq(u.beep, A.beepPattern("close"));
   assert(Math.abs(u.beepPan) < 0.5);
 });
-test("危險升級成停", () => {
+test("三級警示：注意 → 危險 → 停，警示音一級比一級急", () => {
   const engine = new AlertEngine(0);
   const hit = ttcSec => [track({ ttcSec, inCollisionZone: true })];
-  const far = engine.update(hit(2.8), 0, false);
-  eq(texts(far), ["危險，正前方行人"]); eq(far.beep, A.beepPattern("near")); assert(far.alarmOn.ttc);
-  eq(texts(engine.update(hit(2.2), 0.3, false)), []);
-  const urgent = engine.update(hit(C.TTC_URGENT_SEC), 0.9, false);
-  eq(urgent.speech, [["停，正前方行人", C.SPEECH_PRIORITY.urgent]]);
-  eq(urgent.beep, A.beepPattern("close"));
+  const notice = engine.update(hit(2.8), 0, false);
+  eq(notice.speech, [["注意，正前方行人", C.SPEECH_PRIORITY.notice]]); eq(notice.beep, A.beepPattern("far")); assert(notice.alarmOn.ttc);
+  eq(texts(engine.update(hit(C.TTC_WARN_SEC + 0.1), 0.3, false)), []);
+  eq(texts(engine.update(hit(C.TTC_WARN_SEC), 0.4, false)), [], "「注意」才剛開口，先讓它念完");
+  // 方向已經念過：升級時只念一個詞，三級在一兩秒內接連發生，整句會互相打斷
+  const danger = engine.update(hit(C.TTC_WARN_SEC), C.TTC_ESCALATE_MIN_GAP_SEC, false);
+  eq(danger.speech, [["危險", C.SPEECH_PRIORITY.ttc]]); eq(danger.beep, A.beepPattern("near"));
+  const urgent = engine.update(hit(C.TTC_URGENT_SEC), 1.2, false);
+  eq(urgent.speech, [["停", C.SPEECH_PRIORITY.urgent]]); eq(urgent.beep, A.beepPattern("close"));
+  eq(texts(engine.update(hit(1), 1.4, false)), []);
+  // 一出現就已經很近：直接從那一級開始，要帶方向
+  eq(texts(new AlertEngine(0).update(hit(2), 0, false)), ["危險，正前方行人"]);
+  eq(texts(new AlertEngine(0).update(hit(1), 0, false)), ["停，正前方行人"]);
+});
+test("框的顏色跟語音同一套分級，沒有危險就是綠框", () => {
+  const level = o => alertLevelOf(track(o));
+  eq(level({}), "SAFE");
+  eq(level({ ttcSec: 2.8 }), "SAFE", "沒有判定會撞上");
+  eq(level({ ttcSec: 2.8, inCollisionZone: true }), "NOTICE");
+  eq(level({ ttcSec: 2, inCollisionZone: true }), "DANGER");
+  eq(level({ ttcSec: 1, inCollisionZone: true }), "STOP");
+  eq(level({ proximityLevel: "RED" }), "DANGER", "擋在路上很近");
+  eq(level({ proximityLevel: "RED", onCourse: false }), "SAFE", "從旁邊經過的不算");
+  eq(Object.keys(C.ALERT_COLORS), ["SAFE", "NOTICE", "DANGER", "STOP"]);
+  eq(C.ALERT_COLORS.SAFE, C.LEVEL_COLORS.GREEN);
 });
 test("判定閃爍不會一直喊危險", () => {
   const engine = new AlertEngine(0), hit = track({ ttcSec: 2.5, inCollisionZone: true }), spoken = [];
   for (let i = 0; i < 40; i++) spoken.push(...texts(engine.update(i % 2 === 0 ? [hit] : [], i * 0.25, false)));
-  eq(spoken, ["危險，正前方行人"]);
+  eq(spoken, ["注意，正前方行人"]);
 });
 test("不同警報不搶話、沒念到的不會被吃掉", () => {
   const engine = new AlertEngine(0);
   const p = track({ trackId: 1, ttcSec: 2.5, inCollisionZone: true, proximityLevel: "RED" });
   const q = track({ trackId: 2, proximityLevel: "RED", horizontalPosition: "left" });
-  eq(texts(engine.update([p], 0, false)), ["危險，正前方行人"]);
+  eq(texts(engine.update([p], 0, false)), ["注意，正前方行人"]);
   eq(texts(engine.update([p], 0.5, false)), []);
   eq(texts(engine.update([p, q], 0.6, false)), []);
   eq(texts(engine.update([p, q], C.ALARM_VOICE_GLOBAL_GAP_SEC + 0.1, false)), ["左前方，行人很近"]);
   const other = new AlertEngine(0);
   const near = track({ trackId: 1, proximityLevel: "RED" });
-  const fast = track({ trackId: 2, label: "機車", rawLabel: "motorcycle", speedLevel: "fast", speedPctS: 90, ttcSec: 2 });
+  const fast = track({ trackId: 2, label: "機車", rawLabel: "motorcycle", speedLevel: "fast", speedSource: "lateral", speedPctS: 90, ttcSec: 2 });
   eq(other.update([near, fast], 0, false, { staticHazards: [hazard()] }).speech.length, 1);
   assert(other.update([near, fast], C.ALARM_VOICE_MIN_GAP_SEC + 0.1, false, { staticHazards: [hazard()] }).speech.length);
 });
@@ -937,7 +955,7 @@ test("交錯：對向走來、橫向隔 0.7 公尺錯身而過，不喊危險也
 test("交錯：正面走來的人照樣在 3 秒前喊危險、再喊停", async () => {
   for (const side of [0, 0.2]) {
     const { said } = await walkAndListen(t => [side, 10 - 2.5 * t], 3.8);
-    assert(said[0]?.startsWith("危險") && said.some(x => x.startsWith("停")), `橫向隔 ${side} 公尺：${JSON.stringify(said)}`);
+    eq(said.slice(0, 3), ["注意，正前方行人", "危險", "停"], `橫向隔 ${side} 公尺`);
   }
   const frames = await walk(t => [0, 10 - 2.5 * t], 3.8), first = frames.findIndex(anyDanger);
   assert(first >= 0 && 4 - (first + 1) / 10 >= 2.6, `第 ${first} 幀才判定，離撞上只剩 ${(4 - (first + 1) / 10).toFixed(1)} 秒`);
@@ -965,16 +983,16 @@ test("交錯：一串人陸續走來，同一句話不會連續念，「停」�
 });
 test("交錯：判定在邊緣閃爍時，警示音節奏不會快慢快慢亂跳", () => {
   const engine = new AlertEngine(0), patterns = [];
-  // 一個「很快」的人（慢節奏），會撞上的判定每隔一幀有、一幀沒有（快節奏）
+  // 一台橫越的機車（慢節奏），會撞上的判定每隔一幀有、一幀沒有（快節奏）
   for (let i = 0; i < 30; i++) {
     const hit = i % 2 === 0;
-    const u = engine.update([track({ speedLevel: "fast", speedPctS: 90, ttcSec: 2.5, inCollisionZone: hit, distanceM: 6 })], i / 10, false);
+    const u = engine.update([track({ speedLevel: "fast", speedSource: "lateral", speedPctS: 90, ttcSec: 2, inCollisionZone: hit, distanceM: 6 })], i / 10, false);
     patterns.push(JSON.stringify(u.beep));
   }
   eq(new Set(patterns).size, 1, "節奏應該維持在比較急的那一種");
   // 變急要馬上變；危險過了、穩定一小段時間後才變緩
   const calm = [];
-  for (let i = 30; i < 50; i++) calm.push(engine.update([track({ speedLevel: "fast", speedPctS: 90, ttcSec: 2.5, distanceM: 6 })], i / 10, false).beep);
+  for (let i = 30; i < 50; i++) calm.push(engine.update([track({ speedLevel: "fast", speedSource: "lateral", speedPctS: 90, ttcSec: 2, distanceM: 6 })], i / 10, false).beep);
   eq(calm[0], A.beepPattern("near")); eq(calm.at(-1), A.beepPattern("far"));
   eq(engine.update([track({ ttcSec: 1, inCollisionZone: true })], 5.0, false).beep, A.beepPattern("close"));
 });
@@ -1004,6 +1022,31 @@ test("剛看到的遠處小框：框高抖幾個像素不算靠近，也不會�
   const det = new HazardDetector(new FakeCrowd(n => [[300, 300 - 42 - jitter[n % jitter.length], 340, 300]]), null);
   det.yolo.detect = async function () { return this.boxes(this.calls++).map(box => ({ box, score: 0.9, rawLabel: "motorcycle" })); };
   for (let i = 0; i < 30; i++) assert(!anyDanger(await det.process(scene, (i + 1) / 10)), `第 ${i} 幀誤判會撞上`);
+});
+
+// ---------- 人多：框常常有一兩幀框錯，不能因此亂報 ----------
+test("人多：某一幀把兩個人框成一個大框，不算靠近、不算很快、距離分級不變", async () => {
+  // 站在 4 公尺外不動的人；第 12、20 幀跟旁邊的人被框在一起（寬變兩倍、高多兩成）
+  const normal = [290, 180, 350, 350], merged = [290, 150, 410, 350];
+  const det = new HazardDetector(new FakeCrowd(n => [n === 12 || n === 20 ? merged : normal]), null), engine = new AlertEngine(0);
+  for (let i = 0; i < 30; i++) {
+    const tracks = await det.process(scene, (i + 1) / 10);
+    assert(!anyDanger(tracks), `第 ${i} 幀誤判會撞上`);
+    assert(tracks.every(tr => tr.speedLevel === "slow" && tr.proximityLevel === "GREEN"), `第 ${i} 幀：${tracks.map(tr => tr.speedLevel + tr.proximityLevel)}`);
+    const u = engine.update(tracks, (i + 1) / 10, false);
+    eq(u.speech, []); eq(u.beep, null);
+  }
+});
+test("人多：一出現就很大的框（框錯）先不報很近，持續存在才報", () => {
+  const engine = new AlertEngine(0), big = age => [nearPerson(0.9, 7, { ageSec: age })];
+  eq(engine.update(big(0), 0, false).speech, []); eq(engine.update(big(0.1), 0.1, false).beep, null);
+  eq(texts(engine.update(big(C.ALARM_MIN_TRACK_AGE_SEC), 0.5, false)), ["正前方，行人很近"]);
+});
+test("框高成長率：一兩個跳掉的樣本不影響（Theil–Sen）", () => {
+  const ts = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], clean = ts.map(t => 1190 / (9 - 2.5 * t));
+  const spiked = clean.map((v, i) => (i === 4 ? v * 1.25 : v));
+  close(A.loomingRate(ts, clean), 2.5 / (9 - 2.5 * 0.7), 1e-6);
+  close(A.loomingRate(ts, spiked), A.loomingRate(ts, clean), 0.02);
 });
 
 // ---------- 模型下載：斷線、卡住、不完整都要拿到完整的檔案 ----------

@@ -33,6 +33,15 @@ export function isTrackOfInterest(tr) {
     || tr.speedLevel !== "slow" || tr.speedPctS > C.ATTENTION_GROWTH_PCT_S || ttcIsMeaningful(tr.ttcSec);
 }
 
+// 畫面上框的顏色跟語音同一套分級：SAFE（綠）→ NOTICE（注意）→ DANGER（危險，或擋在路上很近）→ STOP（停）
+export function alertLevelOf(tr) {
+  const hit = tr.inCollisionZone && Number.isFinite(tr.ttcSec);
+  if (hit && tr.ttcSec <= C.TTC_URGENT_SEC) return "STOP";
+  if (hit && tr.ttcSec <= C.TTC_WARN_SEC || tr.proximityLevel === "RED" && tr.onCourse !== false) return "DANGER";
+  if (hit && tr.ttcSec <= C.TTC_DANGER_SEC) return "NOTICE";
+  return "SAFE";
+}
+
 // 物體在畫面上的水平位置換算成 -1（最左）~ 1（最右），給左右聲道提示
 export function horizontalPan(item, frameWidth) {
   const cx = (item.box[0] + item.box[2]) / 2;
@@ -79,6 +88,7 @@ export class AlertEngine {
     this.lastAlarmOn = -Infinity;
     this.ttcLastHit = new Map();      // 追蹤編號 → 最後一次判定即將撞上的時間
     this.ttcLastUrgent = new Map();
+    this.ttcLastWarn = new Map();
     this.lastTtcSeen = -Infinity;
     this.lastTtcVoice = -Infinity;
     this.lastAnyVoice = -Infinity;
@@ -88,7 +98,6 @@ export class AlertEngine {
     this.lastAlarmSpeech = -Infinity;
     this.lastSpeechUrgent = false;
     this.hazardSince = -Infinity;     // 這一段危險從什麼時候開始
-    this.speedSince = null;
     this.alarmSpoken = false;         // 這次危險念過警報，結束時才需要念「警報解除」
     this.darkSince = null;
     this.lastLowLightVoice = -Infinity;
@@ -148,7 +157,8 @@ export class AlertEngine {
     return ts - (this.lastSaid.get(text) ?? -Infinity) < C.SAME_TEXT_GAP_SEC;
   }
 
-  // 分兩級：危險 → 停。判定短暫閃斷（TTC_RELEASE_SEC 內）不算重新靠近，否則同一個人會被一直喊「危險」
+  // 分三級：注意（TTC_DANGER_SEC 內）→ 危險（TTC_WARN_SEC 內）→ 停（TTC_URGENT_SEC 內）。
+  // 判定短暫閃斷（TTC_RELEASE_SEC 內）不算重新靠近，否則同一個人會被一直喊
   ttcSpeech(ttcHits, ts, out) {
     // 記憶裡的是「念過」的物體：還在危險就延長；沒念過的（被語音間隔擋下）下一幀還要再試，不能吃掉
     const fresh = (hits, memory) => {
@@ -156,24 +166,32 @@ export class AlertEngine {
       for (const tr of hits) if (memory.has(tr.trackId)) memory.set(tr.trackId, ts);
       return hits.filter(tr => !memory.has(tr.trackId));
     };
-    const newHits = fresh(ttcHits, this.ttcLastHit);
-    const newUrgent = fresh(ttcHits.filter(tr => tr.ttcSec <= C.TTC_URGENT_SEC), this.ttcLastUrgent);
     const say = (template, tr) => fmt(template, { dir: C.DIRECTION_TEXT[tr.horizontalPosition], obj: tr.label });
-    // 剛念過的同一句先不念（沒念到的留在名單裡，之後還在危險會再試）；警示音照響，「停」不受限
-    const sayable = newHits.filter(tr => !this.saidRecently(say(C.TTC_ALERT_TEXT, tr), ts));
-    let template, priority, worst;
-    if (newUrgent.length) {
-      [template, priority, worst] = [C.TTC_URGENT_ALERT_TEXT, C.SPEECH_PRIORITY.urgent, minBy(newUrgent, tr => tr.ttcSec)];
-      this.ttcLastUrgent.set(worst.trackId, ts);
-    } else if (sayable.length && ts - this.lastTtcVoice >= C.ALARM_VOICE_MIN_GAP_SEC) {
-      [template, priority, worst] = [C.TTC_ALERT_TEXT, C.SPEECH_PRIORITY.ttc, minBy(sayable, tr => tr.ttcSec)];
-    } else {
+    // 由急到緩；[門檻秒數, 念過的名單, 完整句, 升級時的短句, 優先順序]
+    const tiers = [
+      [C.TTC_URGENT_SEC, this.ttcLastUrgent, C.TTC_URGENT_ALERT_TEXT, C.TTC_URGENT_SHORT_TEXT, C.SPEECH_PRIORITY.urgent],
+      [C.TTC_WARN_SEC, this.ttcLastWarn, C.TTC_ALERT_TEXT, C.TTC_ALERT_SHORT_TEXT, C.SPEECH_PRIORITY.ttc],
+      [C.TTC_DANGER_SEC, this.ttcLastHit, C.TTC_NOTICE_TEXT, C.TTC_NOTICE_TEXT, C.SPEECH_PRIORITY.notice],
+    ];
+    const news = tiers.map(([sec, memory]) => fresh(ttcHits.filter(tr => tr.ttcSec <= sec), memory));
+    for (let i = 0; i < tiers.length; i++) {
+      const [, , full, short, priority] = tiers[i];
+      // 已經念過方向的同一個物體升級時只念一個詞（「危險」「停」）：三級在一兩秒內接連發生，整句會互相打斷
+      const text = tr => (this.ttcLastHit.has(tr.trackId) && i < 2 ? short : say(full, tr));
+      let candidates = news[i];
+      // 剛念過的同一句先不念（沒念到的留在名單裡，之後還在危險會再試）；警示音照響，「停」與升級不受限
+      if (i > 0) candidates = candidates.filter(tr => this.ttcLastHit.has(tr.trackId) && i < 2 || !this.saidRecently(text(tr), ts));
+      if (i === 2 && ts - this.lastTtcVoice < C.ALARM_VOICE_MIN_GAP_SEC) candidates = [];
+      // 「注意，某方向某物」才剛開口就被「危險」打斷，兩句都聽不清楚：讓它先念完；「停」不等
+      if (i === 1 && ts - this.lastTtcVoice < C.TTC_ESCALATE_MIN_GAP_SEC) candidates = [];
+      if (!candidates.length) continue;
+      const worst = minBy(candidates, tr => tr.ttcSec), line = text(worst);
+      for (let j = i; j < tiers.length; j++) tiers[j][1].set(worst.trackId, ts);   // 比這一級緩的都算念過
+      this.lastTtcVoice = ts;
+      out.alerts.push([`${worst.label}即將撞上`, worst.horizontalPosition]);
+      out.speech.push([line, priority]);
       return;
     }
-    this.ttcLastHit.set(worst.trackId, ts);
-    this.lastTtcVoice = ts;
-    out.alerts.push([`${worst.label}即將撞上`, worst.horizontalPosition]);
-    out.speech.push([say(template, worst), priority]);
   }
 
   // ts 單位為秒
@@ -196,12 +214,14 @@ export class AlertEngine {
     const speedText = tr => (tr.speedSource === "lateral" ? C.LATERAL_ALERT_TEXT : C.SPEED_ALERT_TEXT);
     const levelIndex = l => BEEP_LEVELS.indexOf(l);
     // 以預測軌跡為主：軌跡不會進入行走路徑的物體，再近、再快也不發警報（沒有這個欄位時視為在路徑上）
-    const onCourse = tracks.filter(tr => tr.onCourse !== false || !C.TRAJECTORY_FIRST);
+    // 剛冒出來的物體先不報「很近／很快」：人多時常有一兩幀把兩個人框成一個大框，一出現就是「過近」
+    const onCourse = tracks.filter(tr => (tr.onCourse !== false || !C.TRAJECTORY_FIRST)
+      && (tr.ageSec ?? Infinity) >= C.ALARM_MIN_TRACK_AGE_SEC);
     // 橫越：遠處的車不會撞到人，距離不明時寧可提醒。
     // 靠近：面積變化率對遠處的小目標雜訊很大，要 TTC 也認為快到了才算，否則 6 秒外就會喊「很快」。
-    const speedMatters = tr => (tr.speedSource === "lateral"
-      ? !Number.isFinite(tr.distanceM) || tr.distanceM <= C.SPEED_ALERT_MAX_M
-      : tr.ttcSec <= C.SPEED_ALERT_MAX_TTC_SEC);
+    // 朝使用者靠近的「很快」不另外報：那就是「注意／危險／停」，再多一種說法只會搶話（人多時也最容易亂報）
+    const speedMatters = tr => tr.speedSource === "lateral"
+      && (!Number.isFinite(tr.distanceM) || tr.distanceM <= C.SPEED_ALERT_MAX_M);
     const alarmSources = {
       // 已經判定「過近」的物體，距離不明時至少用「近」的節奏
       // 最近的最危險；只看佔畫面比例的話，遠處的公車會蓋過被切到一半的近人
@@ -221,7 +241,6 @@ export class AlertEngine {
       // 語音播放時警示音會暫停；念完前不算解除，否則短暫的紅色狀態只聽得到一聲
       if (redItems.length || (wasOn && speaking)) this.alarmLastSeen[kind] = ts;
       present[kind] = redItems.length > 0;
-      if (kind === "speed") this.speedSince = redItems.length ? (this.speedSince ?? ts) : null;
       if (redItems.length) {
         const worst = maxBy(redItems, severity);
         this.alarmPan[kind] = horizontalPan(worst, frameWidth);
@@ -235,8 +254,7 @@ export class AlertEngine {
         if (unannounced.length && sinceVoice >= C.ALARM_VOICE_MIN_GAP_SEC
             && (!wasOn || (sinceVoice >= repeatGap && this.alarmRepeats[kind] < C.ALARM_VOICE_MAX_SAYS))) {
           const speak = maxBy(unannounced, severity);
-          const tooSoon = kind === "speed" && speak.speedSource !== "lateral" && ts - this.speedSince < C.SPEED_VOICE_AFTER_SEC;
-          if (!tooSoon && !this.saidRecently(sayText(speak), ts)) waiting.push({ priority: C.SPEECH_PRIORITY[kind], kind, text: sayText(speak), log: logText(speak),
+          if (!this.saidRecently(sayText(speak), ts)) waiting.push({ priority: C.SPEECH_PRIORITY[kind], kind, text: sayText(speak), log: logText(speak),
                          dir: speak.horizontalPosition });
         }
       }
@@ -262,7 +280,7 @@ export class AlertEngine {
       .map(k => [this.alarmLevel[k], C.SPEECH_PRIORITY[k], this.alarmPan[k]]);
     if (ttcHits.length) {
       const nearest = minBy(ttcHits, tr => tr.ttcSec);
-      candidates.push([nearest.ttcSec <= C.TTC_URGENT_SEC ? "close" : "near", C.SPEECH_PRIORITY.ttc,
+      candidates.push([nearest.ttcSec <= C.TTC_URGENT_SEC ? "close" : nearest.ttcSec <= C.TTC_WARN_SEC ? "near" : "far", C.SPEECH_PRIORITY.ttc,
                        horizontalPan(nearest, frameWidth)]);
     }
     // 變急馬上變；要變緩得先穩定 BEEP_DOWN_HOLD_SEC，危險消失則 BEEP_OFF_HOLD_SEC 後就停。判定在邊緣閃爍時節奏才不會快慢快慢亂跳

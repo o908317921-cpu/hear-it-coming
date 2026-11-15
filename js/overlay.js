@@ -1,7 +1,7 @@
 // 在畫面上疊加偵測框、遮罩、標籤、移動方向、碰撞預測與靜態障礙（對應 blindnav/overlay.py）。
 import { C } from "./config.js";
 import { motionArrowEndpoint, ttcIsMeaningful } from "./analysis.js";
-import { isTrackOfInterest, speedDescription } from "./alerts.js";
+import { alertLevelOf, isTrackOfInterest, speedDescription } from "./alerts.js";
 
 const MUTED = "#A0A0A0";
 const ARROW = "#00BEFF";
@@ -124,13 +124,13 @@ export function drawOverlay(ctx, w, h, allTracks, { pathCenterX = null, staticHa
     ctx.strokeStyle = "#8C8C8C"; ctx.lineWidth = 1; ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
     chip(ctx, tr.label, x1, y1 - 22, null, MUTED, 13);
   }
-  for (const tr of focus) drawMask(ctx, tr.mask, C.LEVEL_COLORS[tr.proximityLevel], 0.35);
+  for (const tr of focus) drawMask(ctx, tr.mask, C.ALERT_COLORS[alertLevelOf(tr)], 0.35);
 
   for (const tr of focus) {
     const [x1, y1, x2, y2] = tr.box;
-    const color = C.LEVEL_COLORS[tr.proximityLevel];
+    const level = alertLevelOf(tr), color = C.ALERT_COLORS[level];
     ctx.strokeStyle = color;
-    ctx.lineWidth = tr.proximityLevel === "RED" ? 5 : 3;
+    ctx.lineWidth = level === "STOP" ? 5 : 3;
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
     // 移動方向箭頭；有 TTC 時另外畫出外推的碰撞落點

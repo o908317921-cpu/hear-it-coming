@@ -185,11 +185,16 @@ export function predictCollision({ footX, footY, objectWidth, frameWidth, frameH
 // 尺度 s = fH/Z 對時間是曲線：直接對 s 做直線回歸，斜率代表的是時間窗中段的成長，
 // 時間窗 1 秒時 TTC 3 秒會被算成約 4 秒。等速趨近時 1/s = Z/(fH) 對時間是嚴格的直線，
 // 所以改對 1/s 回歸：TTC = (1/s) ÷ (−斜率)，沒有這個偏差。
+// 用 Theil–Sen（所有兩兩斜率的中位數）而不是最小平方：人多時框常常有一兩幀跳掉
+// （兩個人被框成一個、被前面的人擋住只框到一半），最小平方會被那一幀拉出很大的「靠近速度」，中位數不會。
 export function loomingRate(times, sizes) {
-  const inverse = sizes.map(s => 1 / Math.max(s, 1));
-  const slope = linearSlope(times, inverse);
-  const mean = v => v.reduce((a, b) => a + b, 0) / v.length;
-  const fittedNow = mean(inverse) + slope * (times[times.length - 1] - mean(times));
+  const inverse = sizes.map(s => 1 / Math.max(s, 1)), n = times.length, slopes = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) if (times[j] > times[i]) slopes.push((inverse[j] - inverse[i]) / (times[j] - times[i]));
+  }
+  if (!slopes.length) return 0;
+  const slope = median(slopes), last = times[n - 1];
+  const fittedNow = median(inverse.map((v, i) => v + slope * (last - times[i])));
   return fittedNow > 0 ? -slope / fittedNow : 0;
 }
 

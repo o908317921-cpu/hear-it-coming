@@ -102,7 +102,8 @@ async function analyzeAll(files, fps, over, labels) {
     const r = evaluateClips(clips, labels);
     summaryRows = r.rows;
     lines.push(`實驗二：正確警示 ${r.tp}、誤報 ${r.fp}、漏報 ${r.fn}、正確安靜 ${r.tn}｜精確率 ${r.precision ?? "—"}、召回率 ${r.recall ?? "—"}、F1 ${r.f1 ?? "—"}`
-      + `｜方向正確率 ${r.dirAccuracy ?? "—"}｜平均提前 ${r.leadMean ?? "—"} 秒`);
+      + `｜方向正確率 ${r.dirAccuracy ?? "—"}｜平均提前 ${r.leadMean ?? "—"} 秒`
+      + `（各級：${Object.entries(r.leadByTier).map(([k, v]) => `${k} ${v.mean ?? "—"} 秒／${v.n} 段`).join("、")}）`);
     if (r.unlabeled.length) lines.push(`沒有標註、不計分：${r.unlabeled.join("、")}`);
   } else {
     summaryRows = clips.map(c => ({ 檔名: c.file, 系統警示: c.alerted ? 1 : 0, 第一句秒: c.firstT ?? "", 系統方向: c.dir ?? "", 碰撞警報句數: c.count }));

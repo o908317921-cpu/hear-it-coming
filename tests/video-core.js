@@ -71,19 +71,23 @@ export function parseLabels(text) {
 }
 
 // 一段影片的警報列 → 第一句碰撞警報（注意／危險／停）的時間與方向（方向取第一句有方向的整句）
+const TIERS = ["注意", "危險", "停"];
 export function clipAlert(rows) {
   const ttc = rows.filter(r => r.kind === "speech" && /^(注意|危險|停)/.test(r.text));
-  if (!ttc.length) return { alerted: false, firstT: null, dir: null, count: 0 };
+  if (!ttc.length) return { alerted: false, firstT: null, dir: null, count: 0, tierT: {} };
   const withDir = ttc.find(r => /左前方|正前方|右前方/.test(r.text));
   const dir = withDir ? DIRS[withDir.text.match(/左前方|正前方|右前方/)[0]] : null;
-  return { alerted: true, firstT: ttc[0].t, dir, count: ttc.length };
+  // 三級警示各自第一次出現的時間（報告：各級的提前時間）
+  const tierT = {};
+  for (const tier of TIERS) { const r = ttc.find(x => x.text.startsWith(tier)); if (r) tierT[tier] = r.t; }
+  return { alerted: true, firstT: ttc[0].t, dir, count: ttc.length, tierT };
 }
 
 // clips：[{ file, alerted, firstT, dir }]；labels：parseLabels 的結果。
 // 應警示的片段要在碰撞時刻之前警示才算正確警示；之後才響算漏報
 export function evaluateClips(clips, labels) {
   let tp = 0, fp = 0, fn = 0, tn = 0, dirOk = 0, dirN = 0;
-  const leads = [], rows = [], unlabeled = [];
+  const leads = [], rows = [], unlabeled = [], tierLeads = Object.fromEntries(TIERS.map(t => [t, []]));
   for (const c of clips) {
     const lab = labels.get(stem(c.file));
     if (!lab) { unlabeled.push(c.file); continue; }
@@ -92,18 +96,23 @@ export function evaluateClips(clips, labels) {
     if (lab.alert) {
       if (inTime) {
         tp++; result = "正確警示";
-        if (lab.tc != null) leads.push(lab.tc - c.firstT);
+        if (lab.tc != null) {
+          leads.push(lab.tc - c.firstT);
+          for (const tier of TIERS) if (c.tierT?.[tier] != null && c.tierT[tier] < lab.tc) tierLeads[tier].push(lab.tc - c.tierT[tier]);
+        }
         if (lab.dir) { dirN++; if (c.dir === lab.dir) dirOk++; }
       } else { fn++; result = c.alerted ? "漏報（太晚）" : "漏報"; }
     } else if (c.alerted) { fp++; result = "誤報"; } else { tn++; result = "正確安靜"; }
     rows.push({ 檔名: c.file, 應警示: lab.alert ? 1 : 0, 系統警示: c.alerted ? 1 : 0, 第一句秒: c.firstT ?? "",
                 碰撞時刻: lab.tc ?? "", 提前秒: inTime && lab.tc != null ? +(lab.tc - c.firstT).toFixed(2) : "",
-                標註方向: lab.dir ?? "", 系統方向: c.dir ?? "", 結果: result });
+                標註方向: lab.dir ?? "", 系統方向: c.dir ?? "", 結果: result,
+                ...Object.fromEntries(TIERS.map(t => [`${t}提前秒`, inTime && lab.tc != null && c.tierT?.[t] != null && c.tierT[t] < lab.tc ? +(lab.tc - c.tierT[t]).toFixed(2) : ""])) });
   }
   const r3 = x => (x == null || !Number.isFinite(x) ? null : +x.toFixed(3));
   const precision = tp + fp ? tp / (tp + fp) : null, recall = tp + fn ? tp / (tp + fn) : null;
   const f1 = precision != null && recall != null && precision + recall ? 2 * precision * recall / (precision + recall) : null;
   return { tp, fp, fn, tn, precision: r3(precision), recall: r3(recall), f1: r3(f1),
            dirAccuracy: dirN ? r3(dirOk / dirN) : null, leadMean: leads.length ? r3(leads.reduce((a, b) => a + b, 0) / leads.length) : null,
+           leadByTier: Object.fromEntries(TIERS.map(t => [t, { n: tierLeads[t].length, mean: tierLeads[t].length ? r3(tierLeads[t].reduce((a, b) => a + b, 0) / tierLeads[t].length) : null }])),
            rows, unlabeled };
 }

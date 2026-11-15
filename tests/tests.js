@@ -1213,10 +1213,11 @@ test("實驗二：標註檔、每段第一句警報、精確率／召回率／F1
   let err = ""; try { parseLabels("檔名,應警示\nx,2"); } catch (e) { err = e.message; }
   assert(err.includes("1 或 0"), "應警示只能 1 或 0");
   const speech = (t, text) => ({ kind: "speech", t, text });
-  eq(clipAlert([speech(1, "前方紅燈"), speech(2.5, "注意，正前方行人"), speech(3, "危險")]), { alerted: true, firstT: 2.5, dir: "center", count: 2 });
+  eq(clipAlert([speech(1, "前方紅燈"), speech(2.5, "注意，正前方行人"), speech(3, "危險")]),
+     { alerted: true, firstT: 2.5, dir: "center", count: 2, tierT: { 注意: 2.5, 危險: 3 } });
   eq(clipAlert([speech(1, "行人很近")]).alerted, false);   // 靠近提醒不是碰撞警報
   const clips = [
-    { file: "a.mp4", alerted: true, firstT: 1.5, dir: "center" },   // 正確警示，提前 2.5 秒，方向對
+    { file: "a.mp4", alerted: true, firstT: 1.5, dir: "center", tierT: { 注意: 1.5, 危險: 3, 停: 4.5 } },   // 正確警示，提前 2.5 秒，方向對；「停」在碰撞後不算
     { file: "b.mp4", alerted: true, firstT: 3.5, dir: "left" },     // 碰撞後才響：漏報（太晚）
     { file: "c.mp4", alerted: true, firstT: 2, dir: "right" },      // 誤報
     { file: "d.mp4", alerted: true, firstT: 3.5, dir: "center" },   // 正確警示，提前 1.5 秒，方向錯
@@ -1227,6 +1228,7 @@ test("實驗二：標註檔、每段第一句警報、精確率／召回率／F1
   eq([r.tp, r.fp, r.fn, r.tn], [2, 1, 1, 1]);
   eq([r.precision, r.recall, r.f1, r.dirAccuracy, r.leadMean], [0.667, 0.667, 0.667, 0.5, 2]);
   eq(r.unlabeled, ["z.mp4"]);
+  eq(r.leadByTier, { 注意: { n: 1, mean: 2.5 }, 危險: { n: 1, mean: 1 }, 停: { n: 0, mean: null } });
   eq(r.rows.find(x => x.檔名 === "b.mp4").結果, "漏報（太晚）");
 });
 test("消融：ABLATE_TRACKER 時改用簡單配對，同一個物體仍是同一個編號", () => {

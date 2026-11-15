@@ -45,9 +45,13 @@ async function run() {
   }
   const fps = Number($("fps").value);
   if (!(fps > 0 && fps <= 120)) return log("每秒幀數要在 1 到 120 之間。");
-  // 要在載入模型之前改，MODEL_URL、INFERENCE_SIZE 才會生效；跑完要改回來，下一次分析才不會沿用上一次的設定
-  const original = Object.fromEntries(Object.keys(over).map(k => [k, C[k]]));
-  Object.assign(C, over);
+  // 要在載入模型之前改，MODEL_URL、INFERENCE_SIZE 才會生效；跑完要改回來，下一次分析才不會沿用上一次的設定。
+  // 沒有顯示晶片時會改用 CPU 那組設定（*_WASM）：一起改，換模型才不會在 CPU 上默默沒效果
+  const applied = { ...over };
+  if ("MODEL_URL" in over && !("MODEL_URL_WASM" in over)) applied.MODEL_URL_WASM = over.MODEL_URL;
+  if ("INFERENCE_SIZE" in over && !("INFERENCE_SIZE_WASM" in over)) applied.INFERENCE_SIZE_WASM = over.INFERENCE_SIZE;
+  const original = Object.fromEntries(Object.keys(applied).map(k => [k, C[k]]));
+  Object.assign(C, applied);
   $("run").disabled = true; $("stop").disabled = false;
   for (const id of ["dlTracks", "dlAlerts", "dlSummary"]) $(id).disabled = true;
   stopRequested = false; trackRows = []; alertRows = []; summaryRows = [];
@@ -60,7 +64,13 @@ async function run() {
 
 async function analyzeAll(files, fps, over, labels) {
   log("載入辨識模型…");
-  const yolo = await YoloSegmenter.load();
+  let yolo;
+  try { yolo = await YoloSegmenter.load(); } catch (e) {
+    throw new Error(`辨識模型載入失敗：${e.message || e}。輸入大小可能和模型不符（yolo11n-det-320 只能用 320；448 請配 yolo11n-seg.onnx）`);
+  }
+  // 顯示晶片載入失敗時會默默改用 CPU：實驗六一定要確認真的用了要比較的設定
+  const engine = `辨識：${yolo.backend.toUpperCase()}、輸入 ${yolo.size} 像素、模型 ${(yolo.backend === "webgpu" ? C.MODEL_URL : C.MODEL_URL_WASM).split("/").pop()}`;
+  if ("INFERENCE_SIZE" in over && yolo.size !== over.INFERENCE_SIZE) throw new Error(`輸入大小沒有生效（要 ${over.INFERENCE_SIZE}，實際 ${yolo.size}），不分析`);
   let depth = null;
   if ($("depth").checked) {
     depth = new DepthWorker(); depth.start();
@@ -78,6 +88,7 @@ async function analyzeAll(files, fps, over, labels) {
   } finally { depth?.close?.(); }
 
   const lines = [`${stopRequested ? "已停止" : "完成"}：${clips.length} 段影片，${trackRows.length} 筆物體紀錄、${alertRows.filter(r => r.kind === "speech").length} 句警報。`];
+  lines.push(engine + (depth ? "，含深度模型" : ""));
   if (Object.keys(over).length) lines.push(`設定覆寫：${JSON.stringify(over)}`);
   // 實驗一：只有一段影片時，填了真實碰撞時刻就算 TTC 誤差
   const tc = Number($("tc").value);

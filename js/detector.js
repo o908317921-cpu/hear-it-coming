@@ -220,8 +220,8 @@ export class HazardDetector {
     if (C.STEP_ENABLED && this.tiltOk && !found.some(item => item.kind === "obstacle")) {
       const sides = {};
       const step = findGroundSteps(disp, pathCenterX * sx, exclude, C.COLLISION_ZONE_RATIO, sides);
-      // 平地：看得到地面，而且左右兩半都沒有任何高低差的跡象（只有一半有的也不算平地）
-      flat = !step && sides.groundSeen && !sides.left.row && !sides.right.row;
+      // 平地：每一條都看得到地面，而且沒有任何一條有高低差的跡象
+      flat = !step && sides.groundSeen && !sides.anyEdge;
       const distanceM = step ? groundPlaneDistanceM(step.row / sy, w, h) : Infinity;
       if (step && distanceM <= C.STEP_ALERT_DISTANCE_M) found.push({ ...step, distanceM });
     }

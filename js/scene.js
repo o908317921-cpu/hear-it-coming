@@ -13,23 +13,29 @@ import { median } from "./analysis.js";
 //   跳變：往下幾列之內突然變近很多（比平常的坡度陡 STEP_JUMP_RATIO 倍以上）＝邊緣（落差、台階的邊）
 //   平台：一段距離內逆深度幾乎不變（坡度不到平常的 STEP_FLAT_RATIO）＝立起來的面（台階、路緣的側面）
 // 往上還是往下在實測裡分不準（往上的樓梯常被判成跳變），所以只說「地面有高低差」。
-// 不誤報比抓到更重要（第二輪照片測試）：
-//   · 路徑左右兩半要各自都看到、而且在差不多的高度：台階橫跨整條路，電線桿、柱子只佔一邊
+// 不誤報比抓到更重要（第二、三輪照片測試）：
+//   · 路徑切成 STEP_BANDS 條，每一條都要看到、而且在差不多的高度：台階橫跨整條路，電線桿、柱子、路邊植物只佔一部分
+//     （切兩半時，盲測照片裡路邊植物佔一半、柱子佔另一半就誤報了）
 //   · 要真的看得到往前延伸的地面（坡度夠明顯）：仰拍時中間是天空與燈桿，不是地面
 //   · 鏡頭明顯朝天或朝地時由 detector 直接不判斷（手機的傾斜角度）
+// 已知還會誤報的：一整排擋車的石柱、橫過路面的深色影子邊線（深度模型把它們算成高低差）
 // disparity：{data, width, height}；回傳 null 或 {kind: "level", row, box, centerX, reason}
-// debug：傳入物件時填入左右兩半的結果（實測照片調門檻用）
+// debug：傳入物件時填入 {bands：每一條的結果, groundSeen：每一條都看得到地面, anyEdge：有任何一條看到邊緣}
 export function findGroundSteps(disparity, pathCenterX, exclude = null, pathRatio = C.COLLISION_ZONE_RATIO, debug = null) {
   const { width: w, height: h } = disparity;
   const half = w * pathRatio / 2;
   const x0 = Math.floor(Math.max(0, pathCenterX - half)), x1 = Math.floor(Math.min(w, pathCenterX + half));
-  if (x1 - x0 < 6) return null;
-  const mid = Math.floor((x0 + x1) / 2);
-  const left = stepInBand(disparity, x0, mid, exclude), right = stepInBand(disparity, mid, x1, exclude);
-  if (debug) Object.assign(debug, { left, right, groundSeen: !!(left?.ground && right?.ground) });
-  if (!left?.row || !right?.row || Math.abs(left.row - right.row) > h * C.STEP_SIDE_AGREE_RATIO) return null;
-  const row = Math.round((left.row + right.row) / 2), k = Math.max(2, Math.round(h * C.STEP_WINDOW_RATIO));
-  return { kind: "level", row, reason: `左：${left.reason}；右：${right.reason}`, centerX: (x0 + x1) / 2,
+  const n = C.STEP_BANDS;
+  if (x1 - x0 < 3 * n) return null;
+  const bands = [];
+  for (let i = 0; i < n; i++) {
+    bands.push(stepInBand(disparity, Math.floor(x0 + (x1 - x0) * i / n), Math.floor(x0 + (x1 - x0) * (i + 1) / n), exclude));
+  }
+  const rows = bands.map(b => b?.row).filter(r => r != null);
+  if (debug) Object.assign(debug, { bands, groundSeen: bands.every(b => b?.ground), anyEdge: rows.length > 0 });
+  if (rows.length < n || Math.max(...rows) - Math.min(...rows) > h * C.STEP_SIDE_AGREE_RATIO) return null;
+  const row = Math.round(rows.reduce((a, b) => a + b, 0) / n), k = Math.max(2, Math.round(h * C.STEP_WINDOW_RATIO));
+  return { kind: "level", row, reason: bands.map(b => b.reason).join("；"), centerX: (x0 + x1) / 2,
            box: [x0, Math.max(0, row - 2 * k), x1, Math.min(h, row + 2 * k)] };
 }
 
@@ -104,9 +110,10 @@ export function trafficLightColor(rgba, frameWidth, box) {
       total++;
       const [hue, s, v] = hsv(rgba[i], rgba[i + 1], rgba[i + 2]);
       if (v < C.SIGNAL_MIN_VALUE || s < C.SIGNAL_MIN_SAT) continue;   // 燈殼、天空、沒亮的燈
-      // 台灣的綠燈偏藍綠，色相範圍放寬到青色
-      if (hue < 20 || hue >= 330) counts.red++;
-      else if (hue >= 30 && hue < 70) counts.yellow++;
+      // 台灣的綠燈偏藍綠，色相範圍放寬到青色。實測：紅燈集中在 340°～10°，黃燈（偏橘）散在 10°～40°；
+      // 紅色範圍原本到 20°，盲測照片把黃燈說成紅燈。10°～15° 兩邊都可能，不算
+      if (hue < 10 || hue >= 340) counts.red++;
+      else if (hue >= 15 && hue < 70) counts.yellow++;
       else if (hue >= 90 && hue < 200) counts.green++;
     }
   }
@@ -129,7 +136,7 @@ export function pickLight(lights) {
 // ============================================================
 // 真實照片實測：「每一欄亮暗交錯」連樓梯、磚牆、樹影都算；「整列都亮」又抓不到斜的斑馬線。
 // 改成找白漆：夠亮、不鮮豔，連成一塊後要夠寬、夠扁，而且好幾塊上下疊著。
-// rgba：畫面像素；回傳白色橫條數（≥ CROSSWALK_MIN_STRIPES 才算斑馬線）
+// rgba：畫面像素；回傳符合透視規律的白色橫條數（≥ CROSSWALK_MIN_STRIPES 才算斑馬線）
 export function crosswalkStripes(rgba, w, h, pathCenterX) {
   const half = w * C.CROSSWALK_WIDTH_RATIO / 2;
   const x0 = Math.floor(Math.max(0, pathCenterX - half)), x1 = Math.floor(Math.min(w, pathCenterX + half));
@@ -182,13 +189,22 @@ export function crosswalkStripes(rgba, w, h, pathCenterX) {
       }
     }
     const ww = maxX - minX + 1, hh = maxY - minY + 1;
-    if (ww >= C.CROSSWALK_MIN_WIDTH_RATIO * bw && hh <= C.CROSSWALK_MAX_ASPECT * ww && hh >= 2) stripes.push([(minY + maxY) / 2, hh]);
+    if (ww >= C.CROSSWALK_MIN_WIDTH_RATIO * bw && hh <= C.CROSSWALK_MAX_ASPECT * ww && hh >= 2) stripes.push([(minY + maxY) / 2, hh, ww]);
   }
   // 上下疊著：中心至少差上一條的高度（同一條被切成兩塊不重複算）
   stripes.sort((p, q) => p[0] - q[0]);
-  let count = 0, last = null;
-  for (const st of stripes) if (!last || st[0] - last[0] > Math.max(3, last[1] * 0.8)) { count++; last = st; }
-  return count;
+  const layers = [];
+  for (const st of stripes) if (!layers.length || st[0] - layers[layers.length - 1][0] > Math.max(3, layers[layers.length - 1][1] * 0.8)) layers.push(st);
+  // 透視規律（盲測照片找到的）：真的斑馬線越近越粗、寬度差不多；樓梯、路面邊線、人行道邊緣的白色塊大小亂跳。
+  // 回傳最長的一串「由上往下每一條都比上一條粗、寬度差不到 2 倍」的白條數
+  let best = layers.length ? 1 : 0, run = 1;
+  for (let i = 1; i < layers.length; i++) {
+    const [, h0, w0] = layers[i - 1], [, h1, w1] = layers[i];
+    const ok = h1 >= h0 * C.CROSSWALK_GROW_MIN && Math.max(w0, w1) <= Math.min(w0, w1) * 2;
+    run = ok ? run + 1 : 1;
+    best = Math.max(best, run);
+  }
+  return best;
 }
 
 // ============================================================

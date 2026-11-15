@@ -142,7 +142,8 @@ export const C = {
   STEP_FLAT_RATIO: 0.25,          // 坡度不到平常的這個比例算「立起來的面」
   STEP_FLAT_RUN_RATIO: 0.04,      // 連續這麼多比例的列都是平台才算
   STEP_FLAT_NEAR_FRAC: 0.4,
-  STEP_SIDE_AGREE_RATIO: 0.2,     // 左右兩半找到的邊緣，高度差不到畫面的這個比例才算同一道（台階橫跨整條路）
+  STEP_BANDS: 3,                  // 路徑切成幾條；每一條都要看到同一道邊緣（台階橫跨整條路，柱子、植物只佔一部分）
+  STEP_SIDE_AGREE_RATIO: 0.2,     // 各條找到的邊緣，高度差不到畫面的這個比例才算同一道
   STEP_MIN_GROUND_GRADIENT: 0.6,  // 地面的坡度至少這麼明顯（整個畫面高度內逆深度變化幾倍），否則不是在看前方地面
   STEP_MAX_TILT: 0.35,            // 手機前後傾斜超過約 20 度（重力在鏡頭方向的分量）就不判斷：仰拍、俯拍時地面判斷不可靠
   STEP_ALERT_DISTANCE_M: 8.0,     // 邊緣比這個遠不報
@@ -323,7 +324,8 @@ export const C = {
   CROSSWALK_MAX_SAT: 0.25,        // 白漆不鮮豔
   CROSSWALK_MIN_WIDTH_RATIO: 0.2, // 一條白漆至少有看的範圍這麼寬
   CROSSWALK_MAX_ASPECT: 0.35,     // 而且要扁（高不到寬的這個比例）
-  CROSSWALK_MIN_STRIPES: 3,
+  CROSSWALK_MIN_STRIPES: 3,       // 而且這幾條要符合透視：由上往下每條都比上一條粗、寬度差不到 2 倍
+  CROSSWALK_GROW_MIN: 1.05,
   // 只在深度圖確認前方是平地時才判斷（樓梯的踏面看起來就像白色橫條）；沒有深度模型的手機不報斑馬線
   CROSSWALK_CONFIRM_WINDOW: 15,
   CROSSWALK_CONFIRM_HITS: 10,

@@ -1,5 +1,6 @@
 # 下載真實照片測試用的街景照片（Wikimedia Commons，可自由使用的授權）到 tests/field-photos/，
 # 作者與授權記在 sources.json。照片不放進 git。用法：python tests/fetch_field_photos.py tests/field-photos
+# 第 2、3 組（tests/field-photos-2、-3）是用不同關鍵字另外抓的，關鍵字記在各自的 sources.json（query 欄位）。
 # 之後開 tests/field.html 用真實模型跑；搜尋結果會隨時間改變，檔名對應的照片可能不同，field.js 的人工標註要跟著檢查。
 import json, sys, urllib.error, urllib.request, urllib.parse, os, re, time
 out = sys.argv[1]

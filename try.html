@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F1113">
+<title>照片測試｜盲人尋道</title>
+<link rel="icon" href="data:,">
+<style>
+/* 跟主畫面同一套暗色：中性近黑底、深灰面、細線分隔；唯一的強調色給主要按鈕 */
+:root{
+  --bg:#0F1113; --surface:#171A1D; --surface-2:#1F2327; --line:#2B3035;
+  --text:#ECEEF0; --text-2:#C5CBD1; --muted:#98A1A9;
+  --primary:#2D6CD2; --focus:#8DB4F2;
+  --green:#3CC850; --orange:#FF8C00; --red:#E53935; --static:#9C5CD6;
+  --radius:12px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:720px;margin:0 auto;padding:24px 16px 48px;display:flex;flex-direction:column;gap:18px}
+h1{margin:0;font-size:1.35rem}
+p{margin:0;line-height:1.7;color:var(--text-2)}
+.fine{font-size:.85rem;color:var(--muted)}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label.btn{display:flex;align-items:center;justify-content:center;min-height:72px;border-radius:var(--radius);
+  font-size:1.1rem;font-weight:700;cursor:pointer;text-align:center;padding:8px}
+label.btn.primary{background:var(--primary);color:#fff}
+label.btn.ghost{background:var(--surface-2);border:1px solid var(--line)}
+label.btn:focus-within{outline:3px solid var(--focus);outline-offset:3px}
+input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
+#status{min-height:1.6em;color:#FFC37A}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.card canvas{display:block;width:100%;height:auto;background:#000}
+.card .body{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.say{font-size:1.15rem;font-weight:700}
+.say.quiet{color:var(--muted);font-weight:600}
+.rows{margin:0;padding:0;list-style:none;border-top:1px solid var(--line)}
+.rows li{display:grid;grid-template-columns:5.5em 1fr;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.92rem;line-height:1.5}
+.rows b{color:var(--text)}
+.rows span{color:var(--text-2)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.82rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+a{color:var(--focus)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <h1>照片測試：紅綠燈、地面高低差、斑馬線</h1>
+  <p>拍一張或選幾張照片，用跟 App 一樣的模型看系統會說什麼。照片只在這支手機裡分析，不會上傳。</p>
+  <div class="pick">
+    <label class="btn primary">用鏡頭拍照<input id="camera" type="file" accept="image/*" capture="environment"></label>
+    <label class="btn ghost">從相簿選（可多張）<input id="files" type="file" accept="image/*" multiple></label>
+  </div>
+  <p id="status" role="status" aria-live="polite">第一次使用要下載約 30 MB 的模型，請連 Wi-Fi。</p>
+  <div class="legend" aria-hidden="true">
+    <span><i style="background:var(--red)"></i>紅燈</span><span><i style="background:var(--green)"></i>綠燈</span>
+    <span><i style="background:#8C8C8C"></i>分不出燈號</span><span><i style="background:var(--static)"></i>地面高低差</span>
+    <span><i style="background:#fff"></i>斑馬線白色橫條的範圍</span><span><i style="background:var(--orange)"></i>判斷範圍（行走路徑）</span>
+  </div>
+  <div id="results" style="display:flex;flex-direction:column;gap:18px"></div>
+  <p class="fine">拍照時請像實際使用一樣：手機直立、鏡頭朝前、大約在胸口高度。單張照片和 App 的差別：App 要連續好幾幀都看到才會說，
+    也會用手機傾斜角度擋掉朝天、朝地的畫面；這裡只看一張，所以結果會比 App 敏感一點。沒有顯示晶片加速的手機，App 本身不跑深度模型（沒有地面高低差與斑馬線），這個測試頁仍會算，只是比較慢。</p>
+  <p class="fine"><a href="./">回到盲人尋道</a>　·　<a href="tests/">自動測試</a></p>
+</main>
+<script>
+if (navigator.serviceWorker) navigator.serviceWorker.register("sw.js").catch(function () {});
+</script>
+<script type="module">
+import { C, loadSettings } from "./js/config.js";
+import { YoloSegmenter } from "./js/yolo.js";
+import { DepthWorker } from "./js/depth.js";
+import { findGroundSteps, trafficLightColor, pickLight, crosswalkStripes } from "./js/scene.js";
+
+const $ = id => document.getElementById(id);
+const status = t => { $("status").textContent = t; };
+let yolo = null, depth = null, loading = null, ts = 1;
+
+async function ready() {
+  if (loading) return loading;
+  loading = (async () => {
+    await loadSettings();
+    C.DEPTH_ON_WASM = true;                      // 這一頁只算單張照片，慢一點沒關係
+    status("下載並載入辨識模型…");
+    yolo = await YoloSegmenter.load(p => status(`下載辨識模型 ${Math.round(p * 100)}%`));
+    status("下載並載入深度模型…");
+    depth = new DepthWorker();
+    depth.start();
+    while (!depth.ready && !depth.error) {
+      status(`下載深度模型 ${Math.round(depth.progress * 100)}%`);
+      await new Promise(r => setTimeout(r, 300));
+    }
+    if (depth.error) status("深度模型無法使用，只測紅綠燈與斑馬線（斑馬線需要深度確認平地，會一律不報）。");
+  })();
+  return loading;
+}
+
+function depthOf(canvas, w, h) {
+  return new Promise(ok => {
+    if (!depth?.ready) return ok(null);
+    const my = ts++, started = performance.now();
+    const tryNow = () => {
+      if (depth.submit(canvas, w, h, my)) {
+        const wait = () => {
+          if (depth.result?.ts === my && !depth.busy) return ok(depth.result.disp);
+          if (depth.error || performance.now() - started > 60000) return ok(null);
+          setTimeout(wait, 50);
+        };
+        wait();
+      } else if (performance.now() - started < 60000) setTimeout(tryNow, 100);
+      else ok(null);
+    };
+    tryNow();
+  });
+}
+
+async function analyze(file) {
+  const bitmap = await createImageBitmap(file);
+  const w = 640, h = Math.round(640 * bitmap.height / bitmap.width);
+  const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  const rgba = ctx.getImageData(0, 0, w, h).data;
+  const raw = await yolo.detect(canvas, w, h);
+
+  // 紅綠燈：跟 App 一樣只看路徑附近、夠大、信心夠的燈；一紅一綠就不說
+  const lights = raw.filter(d => d.rawLabel === "traffic light" && d.score >= C.SIGNAL_MIN_CONF).map(d => ({
+    box: d.box, score: d.score, color: trafficLightColor(rgba, w, d.box),
+    inPath: Math.abs((d.box[0] + d.box[2]) / 2 - w / 2) <= w * C.SIGNAL_MAX_OFFSET_RATIO && d.box[3] - d.box[1] >= h * C.SIGNAL_MIN_HEIGHT_RATIO,
+  }));
+  const used = lights.filter(l => l.inPath);
+  const color = pickLight(used);
+
+  // 地面高低差：深度圖，挖掉人車
+  const disp = await depthOf(canvas, w, h);
+  let step = null, sides = {}, flat = false;
+  if (disp) {
+    const sx = disp.width / w, sy = disp.height / h, exclude = new Uint8Array(disp.width * disp.height);
+    for (const d of raw.filter(d => d.score >= 0.4 && d.rawLabel !== "traffic light")) {
+      for (let y = Math.floor(d.box[1] * sy); y < Math.min(disp.height, d.box[3] * sy); y++)
+        for (let x = Math.floor(d.box[0] * sx); x < Math.min(disp.width, d.box[2] * sx); x++) exclude[y * disp.width + x] = 1;
+    }
+    step = findGroundSteps(disp, disp.width / 2, exclude, C.COLLISION_ZONE_RATIO, sides);
+    if (step) step.y = step.row / sy;
+    flat = !step && sides.groundSeen && !sides.anyEdge;
+  }
+  const stripes = crosswalkStripes(rgba, w, h, w / 2);
+  const crosswalk = flat && stripes >= C.CROSSWALK_MIN_STRIPES;
+
+  // ---- 畫圖
+  ctx.lineWidth = 3;
+  const path = w * C.COLLISION_ZONE_RATIO / 2;
+  ctx.setLineDash([8, 6]); ctx.strokeStyle = "#FF8C00";
+  ctx.strokeRect(w / 2 - path, h * C.STEP_SEARCH_TOP_RATIO, path * 2, h * (C.STEP_SEARCH_BOTTOM_RATIO - C.STEP_SEARCH_TOP_RATIO));
+  ctx.setLineDash([3, 5]); ctx.strokeStyle = "#ffffff";
+  ctx.strokeRect(w / 2 - w * C.CROSSWALK_WIDTH_RATIO / 2, h * C.CROSSWALK_TOP_RATIO, w * C.CROSSWALK_WIDTH_RATIO, h * (1 - C.CROSSWALK_TOP_RATIO) - 2);
+  ctx.setLineDash([]);
+  for (const l of lights) {
+    ctx.strokeStyle = { red: "#E53935", green: "#3CC850", yellow: "#FFD400" }[l.color] || "#8C8C8C";
+    ctx.globalAlpha = l.inPath ? 1 : 0.45;
+    ctx.strokeRect(l.box[0], l.box[1], l.box[2] - l.box[0], l.box[3] - l.box[1]);
+  }
+  ctx.globalAlpha = 1;
+  if (step) {
+    ctx.fillStyle = "rgba(156,92,214,.35)"; ctx.fillRect(w / 2 - path, step.y - 10, path * 2, 20);
+    ctx.strokeStyle = "#9C5CD6"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(w / 2 - path, step.y); ctx.lineTo(w / 2 + path, step.y); ctx.stroke();
+  }
+
+  // ---- 文字
+  const say = [color && C.SIGNAL_TEXT[color], step && "正前方，地面有高低差", crosswalk && C.CROSSWALK_TEXT].filter(Boolean);
+  const colorName = c => ({ red: "紅", green: "綠", yellow: "黃" }[c] || "分不出");
+  const lightWhy = !lights.length ? "沒有看到紅綠燈（太小、太遠時看不到）"
+    : !used.length ? `看到 ${lights.length} 個燈，但不在前方或太小（半透明的框），不說`
+    : color ? `前方的燈判讀為${colorName(color)}燈`
+    : used.some(l => l.color) ? `前方同時有不同燈號（${used.map(l => colorName(l.color)).join("、")}），不說` : "前方有燈，但分不出亮的是哪個顏色，不說";
+  const groundWhy = !disp ? "深度模型不能用，沒有判斷"
+    : step ? `路徑每一條都看到同一道邊緣（${step.reason}）`
+    : !sides.groundSeen ? "看不到往前延伸的地面（仰拍、俯拍、被擋住），不判斷"
+    : sides.anyEdge ? `只有一部分看到（${sides.bands.map(b => (b?.row ? "有" : "無")).join("、")}），像是柱子或路邊的東西，不算`
+    : "前方是平地";
+  const crossWhy = stripes < C.CROSSWALK_MIN_STRIPES ? `越近越粗的白色橫條 ${stripes} 條（要 ${C.CROSSWALK_MIN_STRIPES} 條以上）`
+    : !flat ? `白色橫條 ${stripes} 條，但深度圖沒有確認前方是平地（可能是樓梯），不說` : `白色橫條 ${stripes} 條，前方是平地`;
+
+  const card = document.createElement("article");
+  card.className = "card";
+  card.innerHTML = `<div class="body"><div class="say ${say.length ? "" : "quiet"}"></div><ul class="rows"></ul></div>`;
+  card.prepend(canvas);
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "照片與判斷結果標示");
+  card.querySelector(".say").textContent = say.length ? "系統會說：「" + say.join("」「") + "」" : "系統會保持安靜";
+  const rows = card.querySelector(".rows");
+  for (const [k, v] of [["紅綠燈", lightWhy], ["地面", groundWhy], ["斑馬線", crossWhy],
+                        ["其他物體", raw.filter(d => d.score >= 0.4 && d.rawLabel !== "traffic light").length + " 個（行人、車輛等）"]]) {
+    const li = document.createElement("li");
+    li.innerHTML = "<b></b><span></span>";
+    li.querySelector("b").textContent = k; li.querySelector("span").textContent = v;
+    rows.append(li);
+  }
+  $("results").prepend(card);
+}
+
+async function run(files) {
+  if (!files.length) return;
+  try {
+    await ready();
+    let i = 0;
+    for (const f of files) {
+      status(`分析第 ${++i}/${files.length} 張…`);
+      await analyze(f);
+    }
+    status(`完成 ${files.length} 張。可以再拍或再選。`);
+  } catch (e) {
+    console.error(e);
+    status("發生錯誤：" + (e.message || e));
+  }
+}
+$("camera").onchange = e => { run([...e.target.files]); e.target.value = ""; };
+$("files").onchange = e => { run([...e.target.files]); e.target.value = ""; };
+</script>
+</body>
+</html>

@@ -1148,13 +1148,13 @@ test("偵測器：高低差變成靜態障礙，連續兩次才警示", () => {
   det.confirmStatic(found, 0); eq(det.staticState.get("level").confirmed, false);
   det.confirmStatic(found, 0.7); eq(det.staticState.get("level").confirmed, true);
 });
-test("柱子只在路徑一邊：不算高低差（台階要橫跨整條路）", () => {
+test("柱子只在路徑一部分：不算高低差（台階要橫跨整條路）", () => {
   const d = stepDisparity((y, b) => b / 1.2);
   // 路徑左半（x 100～130）有一根近處的柱子：逆深度從上到下都一樣
   for (let y = 60; y < d.height; y++) for (let x = 100; x < 130; x++) d.data[y * d.width + x] = 3 * 60 / 1.2 + 0.7;
   const sides = {};
   eq(findGroundSteps(d, 133, null, C.COLLISION_ZONE_RATIO, sides), null);
-  assert(!sides.left?.row && sides.right?.ground && !sides.right?.row, "柱子那一半不是地面，另一半是平地");
+  assert(!sides.groundSeen && !sides.bands[sides.bands.length - 1]?.row, "柱子那一條不是地面，其他條是平地");
 });
 test("仰拍：中間沒有往前延伸的地面就不判斷", () => {
   const d = stepDisparity(y => 0.05 + 0.001 * y);                  // 幾乎都是遠處（天空、燈桿），越下面只近一點點
@@ -1206,10 +1206,15 @@ function roadRGBA(stripeRows, { w = 320, h = 240, color = [210, 210, 210] } = {}
   }
   return a;
 }
-const zebra = y => Math.floor(y / 12) % 2 === 0;
-test("斑馬線：好幾條寬扁的白色橫條", () => {
+// 透視中的斑馬線：從畫面 0.45 高度往下，白條與間隔越來越粗（遠處細、近處粗）
+const perspectiveBands = (top, heights) => { const out = []; let y = top; for (const hh of heights) { out.push([y, y + hh]); y += hh * 2; } return out; };
+const ZEBRA = perspectiveBands(110, [6, 8, 11, 15, 20]);
+const zebra = y => ZEBRA.some(([a, b]) => y >= a && y < b);
+const stairsLike = y => y >= 110 && Math.floor((y - 110) / 12) % 2 === 0;   // 每一條一樣粗
+test("斑馬線：好幾條寬扁、越近越粗的白色橫條", () => {
   assert(crosswalkStripes(roadRGBA(zebra), 320, 240, 160) >= C.CROSSWALK_MIN_STRIPES);
   eq(crosswalkStripes(roadRGBA(() => false), 320, 240, 160), 0);                           // 一般柏油路
+  assert(crosswalkStripes(roadRGBA(stairsLike), 320, 240, 160) < C.CROSSWALK_MIN_STRIPES, "一樣粗的白條（樓梯、路面邊線）不算");
   eq(crosswalkStripes(roadRGBA(zebra, { color: [230, 200, 40] }), 320, 240, 160), 0);      // 黃色標線不是白漆
   const vertical = new Uint8ClampedArray(320 * 240 * 4);                                    // 直條紋（欄杆影子）
   for (let i = 0; i < 320 * 240; i++) vertical.set(Math.floor((i % 320) / 10) % 2 ? [210, 210, 210, 255] : [70, 70, 72, 255], i * 4);

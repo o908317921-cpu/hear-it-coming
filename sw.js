@@ -1,10 +1,10 @@
 // 離線快取：戶外常沒有網路，網頁檔案與 ONNX Runtime 存在手機裡，斷網也能重新開啟。
 // 模型檔由 js/ort.js 自己快取，這裡不重複存；自己的檔案優先用網路，改版後才拿得到新版。
-const CACHE = "blindnav-shell-v19";
+const CACHE = "blindnav-shell-v20";
 const ORT = "vendor/ort/";
 // 第一次開啟時這些檔案在 service worker 接管前就下載過了，不會經過下面的快取，要在安裝時自己存一份
 const PRECACHE = [
-  "./", "index.html", "settings.json", "manifest.webmanifest", "icon.svg", "tests/bus.png",
+  "./", "index.html", "try.html", "settings.json", "manifest.webmanifest", "icon.svg", "tests/bus.png",
   ...["alerts", "analysis", "app", "audio", "canvas", "config", "depth", "depth-worker", "detector", "motion", "ort", "overlay", "qr", "tracker", "yolo", "scene", "fieldlog"]
     .map(name => `js/${name}.js`),
   // .wasm 跟模型一樣由 js/ort.js 下載與快取

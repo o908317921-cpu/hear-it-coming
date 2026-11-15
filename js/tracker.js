@@ -63,6 +63,8 @@ export class ByteTracker {
     const confirmed = this.tracks.filter(t => t.confirmed);
     const unconfirmed = this.tracks.filter(t => !t.confirmed);
     const output = [];
+    // 實驗三（消融）：不用 ByteTrack，改成只用框重疊率配對一次、低信心框不延續（等同報告的 v3 貪婪配對）
+    if (C.ABLATE_TRACKER) return this.greedyOnly(high, iouCost, now, camera);
     const apply = (t, d) => {
       const dt = now - t.time;
       if (dt > 0.02) {
@@ -106,6 +108,30 @@ export class ByteTracker {
       if (t.confirmed) output.push({ id: t.id, det: d });
     }
     this.tracks = this.tracks.filter(t => !dropped.has(t) && this.frameId - t.lastFrame <= C.TRACK_BUFFER_FRAMES);
+    return output;
+  }
+
+  // 消融用的簡單追蹤：高信心框 ↔ 所有軌跡，框重疊率配對一次；沒配到的框直接建立新軌跡
+  greedyOnly(high, iouCost, now, camera) {
+    const output = [];
+    const { matches, restDets } = greedyMatch(this.tracks, high, iouCost, 0.7);
+    for (const [t, d] of matches) {
+      const dt = now - t.time;
+      if (dt > 0.02) {
+        t.vx = ((d.box[0] + d.box[2]) / 2 - (t.box[0] + t.box[2]) / 2) / dt - camera.vx;
+        t.vy = ((d.box[1] + d.box[3]) / 2 - (t.box[1] + t.box[3]) / 2) / dt - camera.vy;
+      }
+      Object.assign(t, { box: d.box, time: now, lastFrame: this.frameId, lost: false, rawLabel: d.rawLabel, confirmed: true });
+      t.hits++;
+      output.push({ id: t.id, det: d });
+    }
+    for (const d of restDets) {
+      if (d.score < (C.CLASS_CONF_THRESHOLDS[d.rawLabel] ?? C.TRACK_NEW_CONF)) continue;
+      const t = { id: this.nextId++, box: d.box, vx: 0, vy: 0, time: now, lastFrame: this.frameId, hits: 1, lost: false, confirmed: true, rawLabel: d.rawLabel };
+      this.tracks.push(t);
+      output.push({ id: t.id, det: d });
+    }
+    this.tracks = this.tracks.filter(t => this.frameId - t.lastFrame <= C.TRACK_BUFFER_FRAMES);
     return output;
   }
 }

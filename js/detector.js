@@ -162,7 +162,8 @@ export class HazardDetector {
     this.lastDetectMs = performance.now() - started;
     // 紅綠燈不是會撞上的東西：不進追蹤與碰撞判斷，只交給 SceneCues 看顏色
     this.signals = raw.filter(d => d.rawLabel === "traffic light" && d.score >= C.SIGNAL_MIN_CONF);
-    const tracked = this.tracker.update(raw.filter(d => d.rawLabel !== "traffic light"), now, this.cameraMotion);
+    // 實驗三（消融）ABLATE_GMC：配對前不扣掉鏡頭轉動
+    const tracked = this.tracker.update(raw.filter(d => d.rawLabel !== "traffic light"), now, C.ABLATE_GMC ? { vx: 0, vy: 0 } : this.cameraMotion);
 
     const detections = [];
     for (const { id: trackId, det } of tracked) {
@@ -470,6 +471,8 @@ export class HazardDetector {
           ttcSource = "ground";
         }
       }
+      // 實驗三（消融）ABLATE_LANDING：不看預測落點，只要在靠近（TTC 有限）就算在路徑上
+      if (C.ABLATE_LANDING) inCollisionZone = Number.isFinite(ttc);
       const prevTtc = prev ? prev.ttcSec : Infinity;
       const prevHold = prev ? prev.ttcHoldCount : 0;
       // 暫留時不是停在舊值：物體還在靠近，TTC 要跟著時間倒數，「危險」才升得上「停」

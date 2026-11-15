@@ -3,9 +3,10 @@
 import { C, applyUserSettings, classLabel, targetClassIds, COCO_NAMES } from "../js/config.js";
 import * as A from "../js/analysis.js";
 import { AlertEngine, alertLevelOf, sceneSummary, speedDescription, frameSummary } from "../js/alerts.js";
+import { toCsv, parseOverrides, frameTimes } from "./video-core.js";
+import { ByteTracker } from "../js/tracker.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
-import { ByteTracker } from "../js/tracker.js";
 import { keepLargestComponent, maskElongation } from "../js/yolo.js";
 import { downloadWithRetry } from "../js/ort.js";
 import { findGroundSteps, trafficLightColor, crosswalkStripes, SceneCues, pickLight, pedestrianSignals } from "../js/scene.js";
@@ -1187,6 +1188,30 @@ test("紅綠燈顏色：綠色燈殼和樹葉不算綠燈，亮的青綠色 LED 
   eq(trafficLightColor(fill([50, 115, 85]), w, [0, 0, w, h]), null);     // 台灣燈殼的綠漆：暗（亮度約 0.45）
   eq(trafficLightColor(fill([150, 210, 40]), w, [0, 0, w, h]), null);    // 樹葉：黃綠色（色相約 80°）
   eq(trafficLightColor(fill([40, 230, 190]), w, [0, 0, w, h]), "green"); // 亮的青綠色 LED
+});
+test("影片分析：CSV、設定覆寫檢查、幀時間", () => {
+  eq(toCsv([{ a: 1, b: "x,y" }, { a: 2, c: '說"停"' }]), ['a,b,c', '1,"x,y",', '2,,"說""停"""'].join("\n"));
+  eq(toCsv([]), "");
+  eq(parseOverrides("", C), {});
+  eq(parseOverrides('{"ABLATE_TRACKER":true}', C), { ABLATE_TRACKER: true });
+  let err = ""; try { parseOverrides('{"ABLATE_TRAKER":true}', C); } catch (e) { err = e.message; }
+  assert(err.includes("沒有這個設定"), "打錯名稱要報錯");
+  err = ""; try { parseOverrides('{"INFERENCE_SIZE":"448"}', C); } catch (e) { err = e.message; }
+  assert(err.includes("number"), "型別不對要報錯");
+  eq(frameTimes(1, 4), [0, 0.25, 0.5, 0.75]);
+  eq(frameTimes(0, 30), []);
+  eq(frameTimes(Infinity, 30), []);   // 沒寫長度的 webm
+});
+test("消融：ABLATE_TRACKER 時改用簡單配對，同一個物體仍是同一個編號", () => {
+  const keep = C.ABLATE_TRACKER;
+  C.ABLATE_TRACKER = true;
+  try {
+    const tr = new ByteTracker();
+    const det = (x, s = 0.9) => ({ box: [x, 100, x + 50, 220], score: s, rawLabel: "person" });
+    const a = tr.update([det(100)], 0.1), b = tr.update([det(104)], 0.2);
+    eq(a.length, 1); eq(b.length, 1); eq(a[0].id, b[0].id);
+    eq(tr.update([det(300, 0.2)], 0.3).length, 0);   // 低信心框不延續軌跡
+  } finally { C.ABLATE_TRACKER = keep; }
 });
 test("椅子等障礙物不說速度快，也不算最快的物體", () => {
   const chair = { rawLabel: "chair", label: "障礙物", speedLevel: "fast", speedPctS: 90, collisionProbability: 10, ttcSec: Infinity };

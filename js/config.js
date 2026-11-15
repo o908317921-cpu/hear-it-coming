@@ -149,7 +149,11 @@ export const C = {
   STEP_ALERT_DISTANCE_M: 8.0,     // 邊緣比這個遠不報
 
   // ---------- 相機自體運動補償（陀螺儀＋背景位移比對）----------
-  CAMERA_MOTION_MODE: "auto",     // "auto" / "gyro" / "flow" / "none"
+  CAMERA_MOTION_MODE: "auto",     // "auto" / "gyro" / "flow" / "none"（實驗三「移除陀螺儀」= "flow"）
+  // 實驗三（消融）的開關，平常都是 false；在 tests/video.html 的設定欄打開
+  ABLATE_TRACKER: false,          // ByteTrack → 框重疊率貪婪配對
+  ABLATE_LANDING: false,          // 不看預測落點
+  ABLATE_GMC: false,              // 配對前不扣鏡頭轉動
   GYRO_GAIN: 1.0,
   FLOW_WIDTH: 160,                // 背景位移在縮小的畫面上計算，節省運算
   FLOW_MAX_SHIFT: 12,             // 最多比對幾個（縮小後的）像素位移

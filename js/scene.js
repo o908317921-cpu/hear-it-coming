@@ -133,14 +133,19 @@ export function pedestrianSignals(rgba, w, h, debug = null) {
   const cell = C.PED_CELL, gw = Math.floor(w / cell), gh = Math.floor(h * C.PED_TOP_RATIO / cell);
   const kind = new Uint8Array(gw * gh);           // 0 沒有、1 綠、2 橘（倒數數字）
   const lit = new Uint16Array(gw * gh);
+  // 先用最大、最小值擋掉太暗或不鮮豔的像素（絕大多數），通過的才算色相：結果與逐點算 hsv 完全相同，但快很多
+  const minV = C.PED_MIN_VALUE, minS = C.PED_MIN_SAT;
   for (let gy = 0; gy < gh; gy++) {
     for (let gx = 0; gx < gw; gx++) {
       let g = 0, r = 0;   // r：橘
       for (let y = gy * cell; y < (gy + 1) * cell; y++) {
         for (let x = gx * cell; x < (gx + 1) * cell; x++) {
-          const i = (y * w + x) * 4;
-          const [hue, s, v] = hsv(rgba[i], rgba[i + 1], rgba[i + 2]);
-          if (v < C.PED_MIN_VALUE || s < C.PED_MIN_SAT) continue;
+          const i = (y * w + x) * 4, R = rgba[i], G = rgba[i + 1], B = rgba[i + 2];
+          const mx = R > G ? (R > B ? R : B) : (G > B ? G : B);
+          if (mx / 255 < minV) continue;
+          const mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+          if ((mx ? (mx - mn) / mx : 0) < minS) continue;
+          const hue = hsv(R, G, B)[0];
           if (hue >= 130 && hue < 200) g++;      // 台灣的小綠人偏青色
           else if (hue >= 20 && hue < 45) r++;    // 倒數數字是橘色
         }

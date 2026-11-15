@@ -1,0 +1,6 @@
+{
+ "ped-000": "green", "ped-002": "green", "ped-003": "red", "ped-004": "green", "ped-011": "red", "ped-012": "green", "ped-015": "green",
+ "ped-042": "green", "ped-046": "red", "ped-059": "green", "ped-070": "red", "ped-094": "green", "ped-098": "green", "ped-099": "red",
+ "ped-102": "skip", "ped-104": "green", "ped-105": "red", "ped-106": "red",
+ "red-055": "red", "red-081": "red", "red-114": "red", "green-093": "green"
+}

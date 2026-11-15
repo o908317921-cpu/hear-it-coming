@@ -114,7 +114,8 @@ export function trafficLightColor(rgba, frameWidth, box) {
       // 紅色範圍原本到 20°，盲測照片把黃燈說成紅燈。10°～15° 兩邊都可能，不算
       if (hue < 10 || hue >= 340) counts.red++;
       else if (hue >= 15 && hue < 70) counts.yellow++;
-      else if (hue >= 90 && hue < 200) counts.green++;
+      // 綠色從 130° 起算：樹葉是 90°～110°，框裡有樹時會把熄滅的燈說成綠燈（台灣照片 ped-102）；LED 綠燈實測 140°～190°
+      else if (hue >= 130 && hue < 200 && v >= C.SIGNAL_GREEN_MIN_VALUE) counts.green++;
     }
   }
   if (!total) return null;
@@ -193,7 +194,14 @@ export function pedestrianSignals(rgba, w, h, debug = null) {
 
 // 好幾個燈裡要說哪一個：判讀得出顏色的燈都同一個顏色才說；一紅一綠（不同方向的號誌同時入鏡）就不說，
 // 說錯燈號比不說更危險。lights：[{box, color}]；回傳顏色或 null
+// 行人號誌優先：車用燈是給車看的，前方車用燈是綠燈不代表行人可以過。看得到行人號誌時只聽它的，
+// 回傳 "ped_green" 這種帶 ped_ 的值（念「前方行人綠燈」）；看不到才看其他燈。
 export function pickLight(lights) {
+  const ped = lights.filter(l => l.ped && l.color);
+  if (ped.length) {
+    const pc = new Set(ped.map(l => l.color));
+    return pc.size === 1 ? "ped_" + [...pc][0] : null;
+  }
   const colors = new Set(lights.map(l => l.color).filter(Boolean));
   return colors.size === 1 ? [...colors][0] : null;
 }
@@ -298,7 +306,7 @@ export class SceneCues {
         this.lights.push({ box: s.box, color: trafficLightColor(rgba, w, s.box) });
       }
       // YOLO 認不得的台灣 LED 行人號誌（小綠人＋倒數）另外找
-      if (C.PED_ENABLED) this.lights.push(...pedestrianSignals(rgba, w, h));
+      if (C.PED_ENABLED) this.lights.push(...pedestrianSignals(rgba, w, h).map(l => ({ ...l, ped: true })));
     }
     const L = this.light;
     L.votes.push(pickLight(this.lights));

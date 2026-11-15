@@ -309,6 +309,9 @@ export const C = {
   SIGNAL_MIN_HEIGHT_RATIO: 0.025, // 太小的燈顏色分不準
   // 真實照片：亮燈（尤其行人號誌的小人）只佔燈框 1～3%，中心還常常過曝成白色
   SIGNAL_MIN_VALUE: 0.35,         // 夠亮才算亮著的燈
+  // 綠色要更亮才算：台灣號誌的燈殼漆成綠色（亮度約 0.4～0.5），會被當成綠燈（台灣照片 ped-070：小紅人被說成綠燈）。
+  // 紅、黃不跟著提高：過曝的紅燈中心偏橘，邊緣暗紅的像素少掉就會被說成黃燈（red-114）
+  SIGNAL_GREEN_MIN_VALUE: 0.5,
   SIGNAL_MIN_SAT: 0.35,
   SIGNAL_MIN_LIT_SHARE: 0.008,    // 亮燈的顏色至少佔框的這個比例（而且要是第二多顏色的 2 倍）
   // 行人號誌（LED 小綠人／小紅人，YOLO 認不得，見 scene.js pedestrianSignals）
@@ -328,7 +331,7 @@ export const C = {
   SIGNAL_CONFIRM_HITS: 4,         // 最近 6 幀至少 4 幀同一個顏色才說
   SIGNAL_REPEAT_SEC: 20.0,        // 同一個燈號隔這麼久才再提醒（燈號改變時馬上說）
   SIGNAL_FORGET_SEC: 10.0,
-  SIGNAL_TEXT: { red: "前方紅燈", yellow: "前方黃燈", green: "前方綠燈" },
+  SIGNAL_TEXT: { red: "前方紅燈", yellow: "前方黃燈", green: "前方綠燈", ped_green: "前方行人綠燈", ped_red: "前方行人紅燈" },
   CROSSWALK_ENABLED: true,
   // 門檻用真實照片調過：標註的 13 張 11 張對，不是斑馬線的路面零誤報
   CROSSWALK_TOP_RATIO: 0.45,      // 只看畫面下面這一段地面

@@ -1175,6 +1175,19 @@ test("紅綠燈：好幾個燈同一個顏色才說，一紅一綠就不說", ()
   eq(pickLight([{ color: null }]), null);
   eq(pickLight([]), null);
 });
+test("紅綠燈：看得到行人號誌就只聽它的，車用燈不管", () => {
+  eq(pickLight([{ color: "green" }, { color: "red", ped: true }]), "ped_red");   // 車用綠燈＋行人紅燈：說行人紅燈
+  eq(pickLight([{ color: "red" }, { color: "green", ped: true }]), "ped_green");
+  eq(pickLight([{ color: "green", ped: true }, { color: "red", ped: true }]), null);   // 兩個行人號誌不同色：不說
+  eq(pickLight([{ color: "red" }, { color: null, ped: true }]), "red");          // 行人號誌分不出顏色：照舊看其他燈
+  eq(C.SIGNAL_TEXT.ped_green, "前方行人綠燈");
+});
+test("紅綠燈顏色：綠色燈殼和樹葉不算綠燈，亮的青綠色 LED 才算", () => {
+  const w = 40, h = 40, fill = rgb => { const d = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < d.length; i += 4) d.set([...rgb, 255], i); return d; };
+  eq(trafficLightColor(fill([50, 115, 85]), w, [0, 0, w, h]), null);     // 台灣燈殼的綠漆：暗（亮度約 0.45）
+  eq(trafficLightColor(fill([150, 210, 40]), w, [0, 0, w, h]), null);    // 樹葉：黃綠色（色相約 80°）
+  eq(trafficLightColor(fill([40, 230, 190]), w, [0, 0, w, h]), "green"); // 亮的青綠色 LED
+});
 test("行人號誌：小綠人上面有倒數數字才算，只有一團綠點不算", () => {
   const w = 320, h = 240;
   const frame = () => { const d = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < d.length; i += 4) { d[i] = d[i + 1] = d[i + 2] = 40; d[i + 3] = 255; } return d; };

@@ -4,7 +4,7 @@
 import { C } from "../js/config.js";
 import { YoloSegmenter } from "../js/yolo.js";
 import { DepthWorker } from "../js/depth.js";
-import { findGroundSteps, trafficLightColor, crosswalkStripes, pickLight } from "../js/scene.js";
+import { findGroundSteps, trafficLightColor, crosswalkStripes, pickLight, pedestrianSignals } from "../js/scene.js";
 
 // ---------- 人工標註 ----------
 // 第 1 組（54 張）：調門檻用的照片。第 2 組（91 張）：調完門檻後才下載的盲測照片，門檻不再依它修改。
@@ -62,7 +62,13 @@ const SETS = {
     crossSkip: ["cross-52", "cross-58", "cross-67", "cross-69", "cross-70", "light-17", "light-18", "light-19", "light-20"],
   },
 };
-const SET = SETS[new URLSearchParams(location.search).get("set") || "1"];
+// 台灣紅綠燈組（tests/fetch_tw_signals.py 下載）：只測紅綠燈，答案在 tests/tw-labels.json
+const SET_KEY = new URLSearchParams(location.search).get("set") || "1";
+if (SET_KEY === "tw") {
+  SETS.tw = { dir: "field-photos-tw", light: await (await fetch("tw-labels.json")).json(), lightOnly: true,
+    level: [], groundSkip: [], tilted: [], cross: [], crossSkip: [] };
+}
+const SET = SETS[SET_KEY];
 const LIGHT = SET.light, LEVEL = new Set(SET.level), GROUND_SKIP = new Set(SET.groundSkip), TILTED = new Set(SET.tilted);
 const CROSS = new Set(SET.cross), CROSS_SKIP = new Set(SET.crossSkip);
 
@@ -140,14 +146,18 @@ export async function run() {
     // ---- 紅綠燈（照片不是胸前視角，不套路徑位置限制）
     const lights = raw.filter(d => d.rawLabel === "traffic light" && d.score >= C.SIGNAL_MIN_CONF)
       .map(d => ({ box: d.box.map(Math.round), score: +d.score.toFixed(2), color: trafficLightColor(rgba, w, d.box) }));
-    r.light = pickLight(lights);
-    const lightWant = LIGHT[name] ?? null;
+    // 和 App 一樣：YOLO 認不得的台灣 LED 行人號誌另外找（js/scene.js pedestrianSignals）
+    if (C.PED_ENABLED) lights.push(...pedestrianSignals(rgba, w, h).map(l => ({ ...l, ped: true, score: "小綠人規則" })));
+    r.light = pickLight(lights)?.replace("ped_", "") ?? null;   // 答案只標顏色，不分是不是行人號誌
+    // 台灣組只人工確認過一部分（tw-labels.json）：沒列的照片不計分，不是「應該安靜」
+    const lightWant = LIGHT[name] ?? (SET_KEY === "tw" ? "skip" : null);
     if (lightWant !== "skip") {
       const v = judge(lightWant === "mixed" ? null : lightWant, r.light);
       count("紅綠燈", v);
       if (lightWant || r.light || lights.length) row(name, "紅綠燈", lightWant ?? "沒有燈", r.light ?? "安靜", v, JSON.stringify(lights.map(l => [l.color, l.score])));
     }
 
+    if (SET.lightOnly || new URLSearchParams(location.search).has("lightonly")) { results.push(r); continue; }   // ?lightonly：只測紅綠燈
     // ---- 地面高低差（鏡頭傾斜的照片，App 不判斷）
     let level = false, flat = false;
     if (TILTED.has(name)) {

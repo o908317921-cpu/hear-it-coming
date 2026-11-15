@@ -3,7 +3,7 @@
 import { C, applyUserSettings, classLabel, targetClassIds, COCO_NAMES } from "../js/config.js";
 import * as A from "../js/analysis.js";
 import { AlertEngine, alertLevelOf, sceneSummary, speedDescription, frameSummary } from "../js/alerts.js";
-import { toCsv, parseOverrides, frameTimes, ttcError } from "./video-core.js";
+import { toCsv, parseOverrides, frameTimes, ttcError, parseLabels, clipAlert, evaluateClips } from "./video-core.js";
 import { ByteTracker } from "../js/tracker.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
@@ -1206,6 +1206,28 @@ test("影片分析：CSV、設定覆寫檢查、幀時間", () => {
     .concat([{ id: 9, t: 3, predicted: 0, ttc: 0.1 }, { id: 7, t: 4.5, predicted: 1, ttc: 9 }]);
   eq(ttcError(rows, 5), { id: 7, n: 4, mae: 0.2 });
   eq(ttcError([], 5), null);
+});
+test("實驗二：標註檔、每段第一句警報、精確率／召回率／F1／提前時間／方向", () => {
+  const labels = parseLabels("﻿檔名,應警示,碰撞時刻,方向\na.mp4,1,4.0,中\nb.mp4,1,3.0,左\nc.mp4,0,,\nd.mp4,1,5.0,右\ne.mp4,0,,");
+  eq(labels.get("a"), { alert: true, tc: 4, dir: "center" });
+  let err = ""; try { parseLabels("檔名,應警示\nx,2"); } catch (e) { err = e.message; }
+  assert(err.includes("1 或 0"), "應警示只能 1 或 0");
+  const speech = (t, text) => ({ kind: "speech", t, text });
+  eq(clipAlert([speech(1, "前方紅燈"), speech(2.5, "注意，正前方行人"), speech(3, "危險")]), { alerted: true, firstT: 2.5, dir: "center", count: 2 });
+  eq(clipAlert([speech(1, "行人很近")]).alerted, false);   // 靠近提醒不是碰撞警報
+  const clips = [
+    { file: "a.mp4", alerted: true, firstT: 1.5, dir: "center" },   // 正確警示，提前 2.5 秒，方向對
+    { file: "b.mp4", alerted: true, firstT: 3.5, dir: "left" },     // 碰撞後才響：漏報（太晚）
+    { file: "c.mp4", alerted: true, firstT: 2, dir: "right" },      // 誤報
+    { file: "d.mp4", alerted: true, firstT: 3.5, dir: "center" },   // 正確警示，提前 1.5 秒，方向錯
+    { file: "e.mp4", alerted: false, firstT: null, dir: null },     // 正確安靜
+    { file: "z.mp4", alerted: false, firstT: null, dir: null },     // 沒標註
+  ];
+  const r = evaluateClips(clips, labels);
+  eq([r.tp, r.fp, r.fn, r.tn], [2, 1, 1, 1]);
+  eq([r.precision, r.recall, r.f1, r.dirAccuracy, r.leadMean], [0.667, 0.667, 0.667, 0.5, 2]);
+  eq(r.unlabeled, ["z.mp4"]);
+  eq(r.rows.find(x => x.檔名 === "b.mp4").結果, "漏報（太晚）");
 });
 test("消融：ABLATE_TRACKER 時改用簡單配對，同一個物體仍是同一個編號", () => {
   const keep = C.ABLATE_TRACKER;

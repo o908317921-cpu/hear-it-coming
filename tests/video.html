@@ -18,12 +18,14 @@ canvas{max-width:100%;margin-top:12px;border:1px solid #2B3035}
 </head>
 <body>
 <h1>影片逐幀分析（實驗一、二、三、六用）</h1>
-<p>選一段胸前手機錄的影片，用目前手機版的辨識與警報規則<b>一幀一幀</b>跑完，匯出 CSV。時間以影片本身計算，不受電腦快慢影響（離線逐幀處理）。影片沒有陀螺儀資料，鏡頭轉動只用光流估計。</p>
-<label for="file">影片檔</label>
-<input type="file" id="file" accept="video/*">
+<p>選胸前手機錄的影片（一段或多段），用目前手機版的辨識與警報規則<b>一幀一幀</b>跑完，匯出 CSV。時間以影片本身計算，不受電腦快慢影響（離線逐幀處理）。影片沒有陀螺儀資料，鏡頭轉動只用光流估計。</p>
+<label for="file">影片檔（可以一次選多段）</label>
+<input type="file" id="file" accept="video/*" multiple>
+<label for="labels">標註檔（實驗二用，可不選）：CSV 欄位「檔名,應警示,碰撞時刻,方向」，例如 <code>clip01.mp4,1,4.2,中</code>、<code>clip02.mp4,0,,</code>。應警示填 1／0；方向填 左／中／右。應警示的片段要在碰撞時刻之前響才算正確警示。</label>
+<input type="file" id="labels" accept=".csv,text/csv">
 <label for="fps">每秒分析幾幀（建議與錄影相同，常見 30）</label>
 <input type="number" id="fps" value="30" min="1" max="120">
-<label for="tc">真實碰撞時刻（秒，實驗一用，可留空）：側拍算出物體到達鏡頭的時間，填了會算 TTC 平均絕對誤差（只算真實 TTC ≤ 3 秒的幀）</label>
+<label for="tc">真實碰撞時刻（秒，實驗一用，只選一段影片時有效，可留空）：側拍算出物體到達鏡頭的時間，填了會算 TTC 平均絕對誤差（只算真實 TTC ≤ 3 秒的幀）</label>
 <input type="number" id="tc" step="0.01" min="0">
 <label><input type="checkbox" id="depth"> 同時跑深度模型（頭上障礙、地面高低差、斑馬線；較慢）</label>
 <label for="over">設定覆寫（JSON，可留空）。例：消融 <code>{"ABLATE_TRACKER":true}</code>、<code>{"ABLATE_LANDING":true}</code>、<code>{"ABLATE_GMC":true}</code>、移除陀螺儀 <code>{"CAMERA_MOTION_MODE":"flow"}</code>；實驗六 <code>{"INFERENCE_SIZE":448}</code>、<code>{"DETECTION_INTERVAL":3}</code>、分割模型 <code>{"MODEL_URL":"../models/yolo11n-seg.onnx","INFERENCE_SIZE":448}</code></label>
@@ -33,6 +35,7 @@ canvas{max-width:100%;margin-top:12px;border:1px solid #2B3035}
 <button id="stop" disabled>停止</button>
 <button id="dlTracks" disabled>下載 每幀物體.csv</button>
 <button id="dlAlerts" disabled>下載 警報.csv</button>
+<button id="dlSummary" disabled>下載 結果摘要.csv</button>
 </div>
 <div id="log">載入中…</div>
 <canvas id="view"></canvas>

@@ -44,3 +44,66 @@ export function ttcError(rows, tc, maxTtc = 3) {
   if (!errs.length) return { id, n: 0, mae: null };
   return { id, n: errs.length, mae: +(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(3) };
 }
+
+// ---------- 實驗二：多段影片＋人工標註 → 精確率、召回率、F1、提前時間、方向正確率（報告表 4-2） ----------
+const stem = name => String(name).trim().split(/[\\/]/).pop().replace(/\.[^.]+$/, "").toLowerCase();
+const DIRS = { 左: "left", 左前方: "left", left: "left", 中: "center", 正前方: "center", center: "center", 右: "right", 右前方: "right", right: "right" };
+
+// 標註 CSV：欄位「檔名, 應警示(1/0), 碰撞時刻(秒，可空), 方向(左/中/右，可空)」，標題可用中文或英文
+export function parseLabels(text) {
+  const lines = String(text).replace(/^\uFEFF/, "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return new Map();
+  const head = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const col = names => head.findIndex(h => names.includes(h));
+  const fi = col(["檔名", "file", "影片"]), ai = col(["應警示", "alert", "should_alert"]);
+  const ti = col(["碰撞時刻", "tc", "collision"]), di = col(["方向", "dir", "direction"]);
+  if (fi < 0 || ai < 0) throw new Error("標註檔要有「檔名」與「應警示」兩欄");
+  const out = new Map();
+  for (const [n, line] of lines.slice(1).entries()) {
+    const c = line.split(",").map(v => v.trim());
+    const a = c[ai].toLowerCase();
+    if (!["1", "0", "是", "否", "true", "false"].includes(a)) throw new Error(`第 ${n + 2} 行「應警示」要填 1 或 0`);
+    const tc = ti >= 0 && c[ti] !== "" && c[ti] != null ? Number(c[ti]) : null;
+    if (tc != null && !(tc > 0)) throw new Error(`第 ${n + 2} 行「碰撞時刻」要是正數（秒）`);
+    out.set(stem(c[fi]), { alert: ["1", "是", "true"].includes(a), tc, dir: di >= 0 ? DIRS[c[di]] ?? null : null });
+  }
+  return out;
+}
+
+// 一段影片的警報列 → 第一句碰撞警報（注意／危險／停）的時間與方向（方向取第一句有方向的整句）
+export function clipAlert(rows) {
+  const ttc = rows.filter(r => r.kind === "speech" && /^(注意|危險|停)/.test(r.text));
+  if (!ttc.length) return { alerted: false, firstT: null, dir: null, count: 0 };
+  const withDir = ttc.find(r => /左前方|正前方|右前方/.test(r.text));
+  const dir = withDir ? DIRS[withDir.text.match(/左前方|正前方|右前方/)[0]] : null;
+  return { alerted: true, firstT: ttc[0].t, dir, count: ttc.length };
+}
+
+// clips：[{ file, alerted, firstT, dir }]；labels：parseLabels 的結果。
+// 應警示的片段要在碰撞時刻之前警示才算正確警示；之後才響算漏報
+export function evaluateClips(clips, labels) {
+  let tp = 0, fp = 0, fn = 0, tn = 0, dirOk = 0, dirN = 0;
+  const leads = [], rows = [], unlabeled = [];
+  for (const c of clips) {
+    const lab = labels.get(stem(c.file));
+    if (!lab) { unlabeled.push(c.file); continue; }
+    const inTime = c.alerted && (lab.tc == null || c.firstT < lab.tc);
+    let result;
+    if (lab.alert) {
+      if (inTime) {
+        tp++; result = "正確警示";
+        if (lab.tc != null) leads.push(lab.tc - c.firstT);
+        if (lab.dir) { dirN++; if (c.dir === lab.dir) dirOk++; }
+      } else { fn++; result = c.alerted ? "漏報（太晚）" : "漏報"; }
+    } else if (c.alerted) { fp++; result = "誤報"; } else { tn++; result = "正確安靜"; }
+    rows.push({ 檔名: c.file, 應警示: lab.alert ? 1 : 0, 系統警示: c.alerted ? 1 : 0, 第一句秒: c.firstT ?? "",
+                碰撞時刻: lab.tc ?? "", 提前秒: inTime && lab.tc != null ? +(lab.tc - c.firstT).toFixed(2) : "",
+                標註方向: lab.dir ?? "", 系統方向: c.dir ?? "", 結果: result });
+  }
+  const r3 = x => (x == null || !Number.isFinite(x) ? null : +x.toFixed(3));
+  const precision = tp + fp ? tp / (tp + fp) : null, recall = tp + fn ? tp / (tp + fn) : null;
+  const f1 = precision != null && recall != null && precision + recall ? 2 * precision * recall / (precision + recall) : null;
+  return { tp, fp, fn, tn, precision: r3(precision), recall: r3(recall), f1: r3(f1),
+           dirAccuracy: dirN ? r3(dirOk / dirN) : null, leadMean: leads.length ? r3(leads.reduce((a, b) => a + b, 0) / leads.length) : null,
+           rows, unlabeled };
+}

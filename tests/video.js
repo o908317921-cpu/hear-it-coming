@@ -6,7 +6,7 @@ import { YoloSegmenter } from "../js/yolo.js";
 import { DepthWorker } from "../js/depth.js";
 import { HazardDetector } from "../js/detector.js";
 import { AlertEngine, alertLevelOf } from "../js/alerts.js";
-import { toCsv, parseOverrides, frameTimes } from "./video-core.js";
+import { toCsv, parseOverrides, frameTimes, ttcError } from "./video-core.js";
 
 const $ = id => document.getElementById(id);
 const log = t => { $("log").textContent = t; };
@@ -113,8 +113,11 @@ async function analyze(file, fps, over) {
   }
   depth?.close?.();
   const speech = alertRows.filter(r => r.kind === "speech").length;
+  const tc = Number($("tc").value), err = $("tc").value !== "" && tc > 0 ? ttcError(trackRows, tc) : null;
   log(`${stopRequested ? "已停止" : "完成"}：${times.length} 幀中處理了 ${new Set(trackRows.map(r => r.frame)).size} 幀有物體，${trackRows.length} 筆物體紀錄、${speech} 句警報。` +
-      (Object.keys(over).length ? `\n設定覆寫：${JSON.stringify(over)}` : ""));
+      (Object.keys(over).length ? `\n設定覆寫：${JSON.stringify(over)}` : "") +
+      (err ? (err.n ? `\n實驗一：物體 ${err.id} 在真實 TTC ≤ 3 秒的 ${err.n} 幀，TTC 平均絕對誤差 ${err.mae} 秒`
+                    : `\n實驗一：物體 ${err.id} 沒有落在真實 TTC ≤ 3 秒的幀（確認碰撞時刻）`) : ""));
   $("run").disabled = false; $("stop").disabled = true; $("dlTracks").disabled = $("dlAlerts").disabled = false;
   URL.revokeObjectURL(video.src);
 }

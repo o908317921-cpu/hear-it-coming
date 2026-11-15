@@ -30,3 +30,17 @@ export function frameTimes(duration, fps) {
   const n = Math.max(1, Math.floor((duration - 0.001) * fps) + 1);
   return Array.from({ length: n }, (_, i) => +(i / fps).toFixed(6)).filter(t => t < duration);
 }
+
+// 實驗一：已知真實碰撞時刻 tc（秒）時，真實 TTC = tc − t。取「出現最多幀、沒被暫留」的那個物體，
+// 只算真實 TTC 在 (0, maxTtc] 的幀（報告的警示區間），回傳平均絕對誤差與用到的幀數
+export function ttcError(rows, tc, maxTtc = 3) {
+  const live = rows.filter(r => !r.predicted && r.ttc !== "" && Number.isFinite(Number(r.ttc)));
+  if (!live.length) return null;
+  const count = new Map();
+  for (const r of live) count.set(r.id, (count.get(r.id) || 0) + 1);
+  const id = [...count].sort((a, b) => b[1] - a[1])[0][0];
+  const errs = live.filter(r => r.id === id).map(r => [tc - r.t, Number(r.ttc)]).filter(([truth]) => truth > 0 && truth <= maxTtc)
+    .map(([truth, est]) => Math.abs(est - truth));
+  if (!errs.length) return { id, n: 0, mae: null };
+  return { id, n: errs.length, mae: +(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(3) };
+}

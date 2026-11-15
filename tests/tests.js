@@ -3,7 +3,7 @@
 import { C, applyUserSettings, classLabel, targetClassIds, COCO_NAMES } from "../js/config.js";
 import * as A from "../js/analysis.js";
 import { AlertEngine, alertLevelOf, sceneSummary, speedDescription, frameSummary } from "../js/alerts.js";
-import { toCsv, parseOverrides, frameTimes } from "./video-core.js";
+import { toCsv, parseOverrides, frameTimes, ttcError } from "./video-core.js";
 import { ByteTracker } from "../js/tracker.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
@@ -1201,6 +1201,11 @@ test("影片分析：CSV、設定覆寫檢查、幀時間", () => {
   eq(frameTimes(1, 4), [0, 0.25, 0.5, 0.75]);
   eq(frameTimes(0, 30), []);
   eq(frameTimes(Infinity, 30), []);   // 沒寫長度的 webm
+  // 實驗一：真實碰撞在 5 秒，估計值每幀多 0.2 秒；只算真實 TTC ≤ 3 秒的幀、只看出現最多幀的物體
+  const rows = [1, 2, 2.5, 3, 4].map(t => ({ id: 7, t, predicted: 0, ttc: +(5 - t + 0.2).toFixed(1) }))
+    .concat([{ id: 9, t: 3, predicted: 0, ttc: 0.1 }, { id: 7, t: 4.5, predicted: 1, ttc: 9 }]);
+  eq(ttcError(rows, 5), { id: 7, n: 4, mae: 0.2 });
+  eq(ttcError([], 5), null);
 });
 test("消融：ABLATE_TRACKER 時改用簡單配對，同一個物體仍是同一個編號", () => {
   const keep = C.ABLATE_TRACKER;

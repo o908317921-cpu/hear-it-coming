@@ -437,6 +437,7 @@ async function processFrame(now, id) {
   const frame = { canvas: grab, imageData: gctx.getImageData(0, 0, w, h), width: w, height: h };
 
   const procStart = performance.now();
+  detector.tiltOk = Math.abs(tiltRatio) <= C.STEP_MAX_TILT;
   const tracks = await detector.process(frame, now, takeGyro());
   const procMs = performance.now() - procStart;
   if (!running || id !== runId) return;   // 等待辨識時已經按了停止，或這一幀已被判定卡住
@@ -655,7 +656,7 @@ $("startBtn").onclick = async () => {
     if (id !== runId) return;           // 載入模型時已經按了停止
     // 只有 WASM 的手機每秒僅約 4 幀（報告實驗四），運算要留給碰撞偵測
     if (C.DEPTH_ENABLED && !depth && (yolo.backend !== "wasm" || C.DEPTH_ON_WASM)) { depth = new DepthWorker(); depth.start(); }
-    if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) $("notice").textContent = "這支手機不偵測頭部高度障礙，只提醒行人、車輛與路上的障礙物。";
+    if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) $("notice").textContent = "這支手機不偵測頭部高度障礙、地面高低差與斑馬線，只提醒行人、車輛、紅綠燈與路上的障礙物。";
     detector = detector || new HazardDetector(yolo, depth);
     detector.reset();
     engine = new AlertEngine();

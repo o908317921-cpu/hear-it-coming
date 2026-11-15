@@ -132,16 +132,19 @@ export const C = {
   },
 
   // ---------- 科展版：地面高低差（深度圖，見 js/scene.js）----------
-  // 門檻用真實照片調過（平地 8 張零誤報、樓梯台階 7 張抓到 4 張），但照片不是胸前視角，仍要實地測試
+  // 門檻用 54 張真實照片調過：鏡頭水平的照片零誤報、樓梯台階 7 張抓到 3 張（寧可漏報也不誤報），仍要實地測試
   STEP_ENABLED: true,
   STEP_SEARCH_TOP_RATIO: 0.35,    // 只看畫面這個高度以下（再上去大多是天空、建築）
   STEP_SEARCH_BOTTOM_RATIO: 0.95, // 最下緣幾列常有鏡頭邊緣的雜訊
   STEP_WINDOW_RATIO: 0.02,        // 幾列平均一次、往下幾列算一次坡度
-  STEP_JUMP_RATIO: 3.0,           // 坡度比平常陡這麼多倍算邊緣（實測平地最多約 2.3 倍）
+  STEP_JUMP_RATIO: 2.5,           // 坡度比平常陡這麼多倍算邊緣（左右兩半都要超過；實測平地最多約 2.3 倍）
   STEP_NEAR_FRAC: 0.3,            // 只看逆深度超過最下面這麼多比例的列（太遠的背景不算）
   STEP_FLAT_RATIO: 0.25,          // 坡度不到平常的這個比例算「立起來的面」
   STEP_FLAT_RUN_RATIO: 0.04,      // 連續這麼多比例的列都是平台才算
   STEP_FLAT_NEAR_FRAC: 0.4,
+  STEP_SIDE_AGREE_RATIO: 0.2,     // 左右兩半找到的邊緣，高度差不到畫面的這個比例才算同一道（台階橫跨整條路）
+  STEP_MIN_GROUND_GRADIENT: 0.6,  // 地面的坡度至少這麼明顯（整個畫面高度內逆深度變化幾倍），否則不是在看前方地面
+  STEP_MAX_TILT: 0.35,            // 手機前後傾斜超過約 20 度（重力在鏡頭方向的分量）就不判斷：仰拍、俯拍時地面判斷不可靠
   STEP_ALERT_DISTANCE_M: 8.0,     // 邊緣比這個遠不報
 
   // ---------- 相機自體運動補償（陀螺儀＋背景位移比對）----------
@@ -300,7 +303,7 @@ export const C = {
   // ---------- 科展版：紅綠燈與斑馬線（見 js/scene.js）----------
   // 只說看到什麼燈，不說「可以過」：分不出行人號誌和車輛號誌，也看不到來車有沒有停
   SIGNAL_ENABLED: true,
-  SIGNAL_MIN_CONF: 0.35,
+  SIGNAL_MIN_CONF: 0.5,           // 實測：信心 0.45 的「燈」是紅色的救生圈箱；寧可漏掉也不要念錯
   SIGNAL_MAX_OFFSET_RATIO: 0.35,  // 燈的中心離行走路徑中線超過畫面寬度的這個比例不算（旁邊路口的燈）
   SIGNAL_MIN_HEIGHT_RATIO: 0.025, // 太小的燈顏色分不準
   // 真實照片：亮燈（尤其行人號誌的小人）只佔燈框 1～3%，中心還常常過曝成白色
@@ -321,8 +324,9 @@ export const C = {
   CROSSWALK_MIN_WIDTH_RATIO: 0.2, // 一條白漆至少有看的範圍這麼寬
   CROSSWALK_MAX_ASPECT: 0.35,     // 而且要扁（高不到寬的這個比例）
   CROSSWALK_MIN_STRIPES: 3,
-  CROSSWALK_CONFIRM_WINDOW: 10,
-  CROSSWALK_CONFIRM_HITS: 6,
+  // 只在深度圖確認前方是平地時才判斷（樓梯的踏面看起來就像白色橫條）；沒有深度模型的手機不報斑馬線
+  CROSSWALK_CONFIRM_WINDOW: 15,
+  CROSSWALK_CONFIRM_HITS: 10,
   CROSSWALK_REPEAT_SEC: 30.0,
   CROSSWALK_TEXT: "前方有斑馬線",
 

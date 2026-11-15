@@ -120,6 +120,8 @@ export class HazardDetector {
     this.brightness = 255;
     this.lastDetectMs = 0;
     this.signals = [];
+    this.tiltOk = true;               // 手機沒有明顯朝天或朝地（app.js 依加速度計設定；沒有感測器時視為正常）
+    this.groundFlatAt = -Infinity;    // 深度圖最後一次確認「前方是平地」的時間：斑馬線只在這時候判斷
     this.scene = new SceneCues();
     this.sceneSpeech = [];            // 這一幀要念的紅綠燈／斑馬線
   }
@@ -213,12 +215,17 @@ export class HazardDetector {
     for (const box of this.depthBoxes.get(this.lastDepthTs) || []) paintMask(exclude, dw, dh, sx, sy, null, box);
     for (const ts of [...this.depthBoxes.keys()]) if (this.lastDepthTs != null && ts < this.lastDepthTs) this.depthBoxes.delete(ts);
     const found = findDepthHazards(disp, pathCenterX * sx, C.COLLISION_ZONE_RATIO, exclude);
+    let flat = false;
     // 地面高低差：前方已經有障礙物（牆、柱子）時不判斷，那時地面的直線本來就會斷掉
-    if (C.STEP_ENABLED && !found.some(item => item.kind === "obstacle")) {
-      const step = findGroundSteps(disp, pathCenterX * sx, exclude);
+    if (C.STEP_ENABLED && this.tiltOk && !found.some(item => item.kind === "obstacle")) {
+      const sides = {};
+      const step = findGroundSteps(disp, pathCenterX * sx, exclude, C.COLLISION_ZONE_RATIO, sides);
+      // 平地：看得到地面，而且左右兩半都沒有任何高低差的跡象（只有一半有的也不算平地）
+      flat = !step && sides.groundSeen && !sides.left.row && !sides.right.row;
       const distanceM = step ? groundPlaneDistanceM(step.row / sy, w, h) : Infinity;
       if (step && distanceM <= C.STEP_ALERT_DISTANCE_M) found.push({ ...step, distanceM });
     }
+    this.groundFlat = flat;
     return found.map(item => {
       const box = [Math.round(item.box[0] / sx), Math.round(item.box[1] / sy),
                    Math.round(item.box[2] / sx), Math.round(item.box[3] / sy)];
@@ -246,6 +253,7 @@ export class HazardDetector {
   updateStatic(detections, now, pathCenterX, disp, depthFresh, w, h) {
     if (disp && depthFresh) {
       this.confirmStatic(this.depthHazards(disp, detections, pathCenterX, w, h), now);
+      if (this.groundFlat) this.groundFlatAt = now; else this.groundFlatAt = -Infinity;
     } else if (this.staticState.size && !disp) {
       this.staticState.clear();   // 深度結果過期（例如模型停用）時不要一直警示舊障礙
     }
@@ -586,7 +594,8 @@ export class HazardDetector {
     // 鏡頭被擋住時不判讀燈號與斑馬線
     this.sceneSpeech = unseeing ? [] : this.scene.update({
       signals: detectionFrame ? this.signals : [], rgba: frame.imageData.data,
-      crosswalk: C.CROSSWALK_ENABLED && !this.staticHazards.some(hz => hz.kind === "level"), w, h, pathCenterX: pathCenterX ?? w / 2, now,
+      // 前方有地面高低差（連還沒確認的也算）時不判斷斑馬線：實測裡樓梯的踏面看起來就像白色橫條
+      crosswalk: C.CROSSWALK_ENABLED && !this.staticState.has("level") && now - this.groundFlatAt <= C.DEPTH_MAX_AGE_SEC, w, h, pathCenterX: pathCenterX ?? w / 2, now,
     });
     return results;
   }

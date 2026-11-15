@@ -13,13 +13,29 @@ import { median } from "./analysis.js";
 //   跳變：往下幾列之內突然變近很多（比平常的坡度陡 STEP_JUMP_RATIO 倍以上）＝邊緣（落差、台階的邊）
 //   平台：一段距離內逆深度幾乎不變（坡度不到平常的 STEP_FLAT_RATIO）＝立起來的面（台階、路緣的側面）
 // 往上還是往下在實測裡分不準（往上的樓梯常被判成跳變），所以只說「地面有高低差」。
+// 不誤報比抓到更重要（第二輪照片測試）：
+//   · 路徑左右兩半要各自都看到、而且在差不多的高度：台階橫跨整條路，電線桿、柱子只佔一邊
+//   · 要真的看得到往前延伸的地面（坡度夠明顯）：仰拍時中間是天空與燈桿，不是地面
+//   · 鏡頭明顯朝天或朝地時由 detector 直接不判斷（手機的傾斜角度）
 // disparity：{data, width, height}；回傳 null 或 {kind: "level", row, box, centerX, reason}
-// debug：傳入物件時填入每一列的數值（實測照片調門檻用）
+// debug：傳入物件時填入左右兩半的結果（實測照片調門檻用）
 export function findGroundSteps(disparity, pathCenterX, exclude = null, pathRatio = C.COLLISION_ZONE_RATIO, debug = null) {
-  const { data, width: w, height: h } = disparity;
+  const { width: w, height: h } = disparity;
   const half = w * pathRatio / 2;
   const x0 = Math.floor(Math.max(0, pathCenterX - half)), x1 = Math.floor(Math.min(w, pathCenterX + half));
-  if (x1 - x0 < 3) return null;
+  if (x1 - x0 < 6) return null;
+  const mid = Math.floor((x0 + x1) / 2);
+  const left = stepInBand(disparity, x0, mid, exclude), right = stepInBand(disparity, mid, x1, exclude);
+  if (debug) Object.assign(debug, { left, right, groundSeen: !!(left?.ground && right?.ground) });
+  if (!left?.row || !right?.row || Math.abs(left.row - right.row) > h * C.STEP_SIDE_AGREE_RATIO) return null;
+  const row = Math.round((left.row + right.row) / 2), k = Math.max(2, Math.round(h * C.STEP_WINDOW_RATIO));
+  return { kind: "level", row, reason: `左：${left.reason}；右：${right.reason}`, centerX: (x0 + x1) / 2,
+           box: [x0, Math.max(0, row - 2 * k), x1, Math.min(h, row + 2 * k)] };
+}
+
+// 一條直條（x0～x1 欄）裡有沒有跳變或平台；回傳 null（看不到地面）、{ground: true}（平地）或 {ground: true, row, reason}
+function stepInBand(disparity, x0, x1, exclude) {
+  const { data, width: w, height: h } = disparity;
   const y0 = Math.floor(h * C.STEP_SEARCH_TOP_RATIO), y1 = Math.floor(h * C.STEP_SEARCH_BOTTOM_RATIO);
   // 幾列平均一次，去掉單列雜訊；窗內有被擋住的列就不算
   const k = Math.max(2, Math.round(h * C.STEP_WINDOW_RATIO));
@@ -43,15 +59,14 @@ export function findGroundSteps(disparity, pathCenterX, exclude = null, pathRati
   const near = [];
   for (let y = y0; y + k < y1; y++) if (p[y] > 0.5 * bottom && !Number.isNaN(slope[y])) near.push(slope[y]);
   const ref = near.length ? median(near) : NaN;
-  if (debug) Object.assign(debug, { ref, bottom, k });
   if (!(ref > 0)) return null;                             // 越下面沒有越近：不是在看地面
-  const found = (row, reason) => ({ kind: "level", row, reason, centerX: (x0 + x1) / 2,
-                                    box: [x0, Math.max(0, row - 2 * k), x1, Math.min(h, row + 2 * k)] });
+  // 坡度換算成「整個畫面高度內逆深度變化幾倍」：平地約 1～3，仰拍天空、燈桿時只有 0.1～0.4
+  if (ref / k * h / bottom < C.STEP_MIN_GROUND_GRADIENT) return null;
+  const found = (row, reason) => ({ ground: true, row, reason });
   let jumpY = -1, jump = 0;
   for (let y = y0; y + k < y1; y++) {
     if (p[y] > C.STEP_NEAR_FRAC * bottom && slope[y] > jump) { jump = slope[y]; jumpY = y; }
   }
-  if (debug) debug.jump = jump / ref;
   if (jumpY >= 0 && jump > C.STEP_JUMP_RATIO * ref) return found(jumpY + (k >> 1), `跳變 ${(jump / ref).toFixed(1)} 倍`);
   const minRun = Math.max(2, Math.round(h * C.STEP_FLAT_RUN_RATIO));
   let run = 0;
@@ -60,7 +75,7 @@ export function findGroundSteps(disparity, pathCenterX, exclude = null, pathRati
       if (++run >= minRun) return found(y + run - 1, `平台 ${run} 列`);   // 平台最下面一列：立面和地面的交界
     } else run = 0;
   }
-  return null;
+  return { ground: true };
 }
 
 // ============================================================
@@ -100,6 +115,13 @@ export function trafficLightColor(rgba, frameWidth, box) {
   const [best, n] = ranked[0];
   if (n / total < C.SIGNAL_MIN_LIT_SHARE || n < ranked[1][1] * 2) return null;
   return best;
+}
+
+// 好幾個燈裡要說哪一個：判讀得出顏色的燈都同一個顏色才說；一紅一綠（不同方向的號誌同時入鏡）就不說，
+// 說錯燈號比不說更危險。lights：[{box, color}]；回傳顏色或 null
+export function pickLight(lights) {
+  const colors = new Set(lights.map(l => l.color).filter(Boolean));
+  return colors.size === 1 ? [...colors][0] : null;
 }
 
 // ============================================================
@@ -193,10 +215,8 @@ export class SceneCues {
         this.lights.push({ box: s.box, color: trafficLightColor(rgba, w, s.box) });
       }
     }
-    const main = this.lights.filter(l => l.color)
-      .sort((p, q) => (q.box[3] - q.box[1]) - (p.box[3] - p.box[1]))[0];
     const L = this.light;
-    L.votes.push(main ? main.color : null);
+    L.votes.push(pickLight(this.lights));
     if (L.votes.length > C.SIGNAL_CONFIRM_WINDOW) L.votes.shift();
     const tally = {};
     for (const v of L.votes) if (v) tally[v] = (tally[v] || 0) + 1;

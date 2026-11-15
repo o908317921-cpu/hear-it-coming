@@ -1,23 +1,29 @@
 // 真實照片測試：用真的 YOLO 與深度模型跑 Wikimedia Commons 的街景照片，和人工標的答案比對。
-// 照片與來源（作者、授權）在 tests/field-photos/sources.json；照片不進 git。
+// 照片與來源（作者、授權）在 tests/field-photos/sources.json；照片不進 git（python tests/fetch_field_photos.py 下載）。
+// 目標是「說出口的都要對」：誤報（說錯）要是 0；漏報（該說沒說）次之。
 import { C } from "../js/config.js";
 import { YoloSegmenter } from "../js/yolo.js";
 import { DepthWorker } from "../js/depth.js";
-import { findGroundSteps, trafficLightColor, crosswalkStripes } from "../js/scene.js";
+import { findGroundSteps, trafficLightColor, crosswalkStripes, pickLight } from "../js/scene.js";
 
-// 人工標註。light：主要燈號；ground：drop（往下）/ step（往上）/ none（平地）；cross：true / false。
-// 沒列的項目不計分（俯拍、老照片、不是胸前視角的照片）
-const LABELS = {
-  "light-00": { light: "green" }, "light-01": { light: "red" }, "light-03": { light: "green" }, "light-04": { light: "red" },
-  "light-05": { light: "red" }, "light-06": { light: "red" }, "light-07": { light: "green" }, "light-08": { light: "green" },
-  "light-09": { light: "red" }, "light-10": { light: "green" },
-  "ground-11": { ground: "none" }, "ground-12": { ground: "none" }, "ground-15": { ground: "none" }, "ground-27": { ground: "none" },
-  "ground-16": { ground: "drop" }, "ground-19": { ground: "drop" }, "ground-20": { ground: "drop" },
-  "ground-21": { ground: "step" }, "ground-22": { ground: "step" }, "ground-24": { ground: "step" }, "ground-17": { ground: "step" },
-  "cross-40": { cross: false, ground: "none" }, "cross-41": { cross: true, ground: "none" }, "cross-42": { cross: false, ground: "none" },
-  "cross-46": { cross: false, ground: "none" }, "cross-50": { cross: false },
-  "cross-39": { cross: true }, "cross-43": { cross: true }, "cross-44": { cross: true }, "cross-51": { cross: true },
+// ---------- 人工標註（54 張都標） ----------
+// 紅綠燈：沒列的照片＝畫面裡沒有燈；"mixed"＝不同燈號同時入鏡（安靜才算對）；"skip"＝燈太小看不清，不計分
+const LIGHT = {
+  "light-00": "green", "light-01": "red", "light-02": "skip", "light-03": "green", "light-04": "red", "light-05": "red",
+  "light-06": "red", "light-07": "mixed", "light-08": "green", "light-09": "red", "light-10": "green",
+  "cross-46": "skip", "cross-47": "red", "cross-51": "skip",
 };
+// 地面：行走路徑上真的有台階、路緣、樓梯
+const LEVEL = new Set(["ground-13", "ground-14", "ground-16", "ground-17", "ground-18", "ground-19", "ground-20", "ground-21",
+  "ground-22", "ground-24", "ground-28", "ground-29", "ground-30", "ground-31"]);
+const GROUND_SKIP = new Set(["ground-25", "ground-26", "cross-38", "cross-48", "cross-49"]);   // 老照片、空拍
+// 鏡頭明顯朝天或朝地：App 會用手機傾斜角度直接不判斷地面（照片沒有感測器，只能人工標）
+const TILTED = new Set(["light-03", "light-05", "light-06", "light-08", "light-09", "light-10", "ground-13", "ground-14",
+  "ground-16", "ground-28", "ground-29", "ground-30", "ground-31", "ground-32", "ground-33", "ground-34", "ground-35",
+  "ground-36", "ground-37"]);
+// 斑馬線：畫面裡行走方向前方有斑馬線
+const CROSS = new Set(["cross-38", "cross-39", "cross-41", "cross-43", "cross-44", "cross-45", "cross-47", "cross-48",
+  "cross-49", "cross-51", "cross-52", "cross-53"]);
 
 const log = t => { document.getElementById("log").textContent += t + "\n"; };
 const tbody = document.querySelector("#out tbody");
@@ -26,16 +32,15 @@ const row = (...cells) => {
   cells.forEach((c, i) => {
     const td = document.createElement("td");
     td.textContent = c;
-    if (i === 4) td.className = c === "對" ? "ok" : c === "錯" ? "bad" : "skip";
+    if (i === 4) td.className = c.startsWith("對") ? "ok" : c === "誤報" ? "bad" : "skip";
     tr.append(td);
   });
   tbody.append(tr);
 };
 
 async function loadImage(src) {
-  const img = new Image();
-  img.src = src;
-  await img.decode();
+  // 不用 img.decode()：瀏覽器分頁在背景時它會一直等下去
+  const img = await createImageBitmap(await (await fetch(src)).blob());
   const w = 640, h = Math.round(640 * img.height / img.width);
   const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -56,36 +61,56 @@ function depthOf(depth, canvas, w, h, ts) {
   });
 }
 
+// want：應該說的內容（null＝應該安靜）；got：系統說的（null＝安靜）
+function judge(want, got) {
+  if (got == null) return want == null ? "對（安靜）" : "漏報";
+  return got === want ? "對" : "誤報";
+}
+
 export async function run() {
   const sources = await (await fetch("field-photos/sources.json")).json();
+  // ?cpu：改用 CPU 跑（沒有顯示晶片的電腦）
+  if (new URLSearchParams(location.search).has("cpu")) { C.USE_WEBGPU = false; C.DEPTH_ON_WASM = true; }
   log("載入 YOLO…");
   const yolo = await YoloSegmenter.load();
   log(`YOLO：${yolo.backend}；載入深度模型…`);
-  const depth = new DepthWorker();
-  depth.start();
-  while (!depth.ready && !depth.error) await new Promise(r => setTimeout(r, 200));
-  if (depth.error) log("深度模型無法使用：" + depth.error);
+  // 瀏覽器分頁在背景時，第一個深度執行緒偶爾一直沒有就緒：等 40 秒，不行就重開一次
+  let depth;
+  for (let attempt = 0; attempt < 3 && !depth?.ready; attempt++) {
+    depth?.close();
+    depth = new DepthWorker();
+    depth.start();
+    const t0 = performance.now();
+    while (!depth.ready && !depth.error && performance.now() - t0 < 40000) await new Promise(r => setTimeout(r, 200));
+    log(`深度模型第 ${attempt + 1} 次：${depth.ready ? "就緒 " + depth.backend : depth.error || "逾時"}（下載 ${Math.round(depth.progress * 100)}%）`);
+  }
+  if (depth.error) throw new Error("深度模型無法使用：" + depth.error);
   const results = [];
-  const score = { light: [0, 0], ground: [0, 0], cross: [0, 0] };
+  const tally = {};
+  const count = (key, verdict) => { tally[key] = tally[key] || {}; tally[key][verdict] = (tally[key][verdict] || 0) + 1; };
   let ts = 1;
   for (const src of sources) {
     const name = src.file.replace(".jpg", "");
-    const label = LABELS[name] || {};
     const { canvas, w, h, rgba } = await loadImage("field-photos/" + src.file);
     const raw = await yolo.detect(canvas, w, h);
-    const r = { name, w, h };
+    const r = { name };
 
-    // 紅綠燈：每個框判讀顏色；取最大、判讀得出來的那個當結果（不套路徑位置限制，照片不是胸前視角）
+    // ---- 紅綠燈（照片不是胸前視角，不套路徑位置限制）
     const lights = raw.filter(d => d.rawLabel === "traffic light" && d.score >= C.SIGNAL_MIN_CONF)
-      .map(d => ({ box: d.box.map(Math.round), score: +d.score.toFixed(2), color: trafficLightColor(rgba, w, d.box),
-                   inPath: Math.abs((d.box[0] + d.box[2]) / 2 - w / 2) <= w * C.SIGNAL_MAX_OFFSET_RATIO
-                     && d.box[3] - d.box[1] >= h * C.SIGNAL_MIN_HEIGHT_RATIO }));
-    const main = lights.filter(l => l.color).sort((a, b) => (b.box[3] - b.box[1]) - (a.box[3] - a.box[1]))[0];
-    r.light = main ? main.color : lights.length ? "框到但分不出顏色" : "沒框到";
-    r.lights = lights;
+      .map(d => ({ box: d.box.map(Math.round), score: +d.score.toFixed(2), color: trafficLightColor(rgba, w, d.box) }));
+    r.light = pickLight(lights);
+    const lightWant = LIGHT[name] ?? null;
+    if (lightWant !== "skip") {
+      const v = judge(lightWant === "mixed" ? null : lightWant, r.light);
+      count("紅綠燈", v);
+      if (lightWant || r.light || lights.length) row(name, "紅綠燈", lightWant ?? "沒有燈", r.light ?? "安靜", v, JSON.stringify(lights.map(l => [l.color, l.score])));
+    }
 
-    // 地面：深度圖 + 挖掉 YOLO 物體
-    if (depth.ready) {
+    // ---- 地面高低差（鏡頭傾斜的照片，App 不判斷）
+    let level = false, flat = false;
+    if (TILTED.has(name)) {
+      r.ground = "鏡頭傾斜，不判斷";
+    } else {
       const disp = await depthOf(depth, canvas, w, h, ts++);
       const sx = disp.width / w, sy = disp.height / h, exclude = new Uint8Array(disp.width * disp.height);
       for (const d of raw.filter(d => d.score >= 0.4 && d.rawLabel !== "traffic light")) {
@@ -94,34 +119,33 @@ export async function run() {
       }
       const dbg = {};
       const st = findGroundSteps(disp, disp.width / 2, exclude, C.COLLISION_ZONE_RATIO, dbg);
-      r.ground = st ? st.kind : "none";
-      r.groundDetail = st ? `第 ${st.row}/${disp.height} 列，${st.reason}` : `最大跳變 ${dbg.jump?.toFixed(1) ?? "-"} 倍`;
-    }
-
-    // 斑馬線
-    r.stripes = crosswalkStripes(rgba, w, h, w / 2);
-    r.cross = r.stripes >= C.CROSSWALK_MIN_STRIPES;
-
-    for (const key of ["light", "ground", "cross"]) {
-      // 往上、往下在實測裡分不準，系統只說「地面有高低差」：答案是 drop／step 的都算 level
-      const want = key === "ground" && label.ground && label.ground !== "none" ? "level" : label[key];
-      const got = r[key];
-      const detail = key === "light" ? JSON.stringify(lights.map(l => [l.color, l.score, l.inPath ? "路徑內" : "路徑外"]))
-        : key === "ground" ? (r.groundDetail || "") : `亮條 ${r.stripes}`;
-      if (want === undefined) {
-        if (key === "light" && lights.length || key === "cross" && got || key === "ground" && got && got !== "none")
-          row(name, key, "（不計分）", String(got), "-", detail);
-        continue;
+      level = !!st;
+      flat = !st && dbg.groundSeen && !dbg.left?.row && !dbg.right?.row;
+      r.ground = st ? "level" : null;
+      if (!GROUND_SKIP.has(name)) {
+        const want = LEVEL.has(name) ? "level" : null;
+        const v = judge(want, r.ground);
+        count("地面高低差", v);
+        if (want || st) row(name, "地面", want ? "有高低差" : "平地", st ? "地面有高低差" : "安靜", v,
+          st ? st.reason : `左 ${dbg.left?.reason ?? "無"}；右 ${dbg.right?.reason ?? "無"}`);
       }
-      const okk = String(want) === String(got);
-      score[key][0] += okk; score[key][1]++;
-      row(name, key, String(want), String(got), okk ? "對" : "錯", detail);
     }
+
+    // ---- 斑馬線（深度圖確認前方是平地才判斷，和 App 一樣；鏡頭傾斜時沒有深度判斷，也不報）
+    const stripes = crosswalkStripes(rgba, w, h, w / 2);
+    r.cross = flat && stripes >= C.CROSSWALK_MIN_STRIPES ? "crosswalk" : null;
+    const crossWant = CROSS.has(name) ? "crosswalk" : null;
+    const v = judge(crossWant, r.cross);
+    count("斑馬線", v);
+    if (crossWant || r.cross || stripes >= C.CROSSWALK_MIN_STRIPES) row(name, "斑馬線", crossWant ? "有" : "沒有", r.cross ? "前方有斑馬線" : "安靜", v,
+      `白色橫條 ${stripes}${!flat && stripes >= C.CROSSWALK_MIN_STRIPES ? "（深度圖沒有確認是平地，不判斷）" : ""}`);
     results.push(r);
   }
-  for (const [k, [a, n]] of Object.entries(score)) log(`${k}：${a}/${n} 對`);
-  window.fieldResults = { results, score };
+  for (const [k, t] of Object.entries(tally)) {
+    log(`${k}：說對 ${t["對"] || 0}、正確安靜 ${t["對（安靜）"] || 0}、漏報 ${t["漏報"] || 0}、誤報 ${t["誤報"] || 0}`);
+  }
+  window.fieldResults = { results, tally };
   document.title = "DONE";
-  return score;
+  return tally;
 }
 run().catch(e => { log("ERROR " + (e.stack || e)); document.title = "ERROR"; });

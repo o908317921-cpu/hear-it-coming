@@ -8,7 +8,7 @@ import { CameraMotionEstimator } from "../js/motion.js";
 import { ByteTracker } from "../js/tracker.js";
 import { keepLargestComponent, maskElongation } from "../js/yolo.js";
 import { downloadWithRetry } from "../js/ort.js";
-import { findGroundSteps, trafficLightColor, crosswalkStripes, SceneCues } from "../js/scene.js";
+import { findGroundSteps, trafficLightColor, crosswalkStripes, SceneCues, pickLight } from "../js/scene.js";
 import { FieldLog } from "../js/fieldlog.js";
 
 const tests = [];
@@ -1147,6 +1147,33 @@ test("偵測器：高低差變成靜態障礙，連續兩次才警示", () => {
   assert(found[0].distanceM > 0 && found[0].distanceM <= C.STEP_ALERT_DISTANCE_M, `距離 ${found[0].distanceM}`);
   det.confirmStatic(found, 0); eq(det.staticState.get("level").confirmed, false);
   det.confirmStatic(found, 0.7); eq(det.staticState.get("level").confirmed, true);
+});
+test("柱子只在路徑一邊：不算高低差（台階要橫跨整條路）", () => {
+  const d = stepDisparity((y, b) => b / 1.2);
+  // 路徑左半（x 100～130）有一根近處的柱子：逆深度從上到下都一樣
+  for (let y = 60; y < d.height; y++) for (let x = 100; x < 130; x++) d.data[y * d.width + x] = 3 * 60 / 1.2 + 0.7;
+  const sides = {};
+  eq(findGroundSteps(d, 133, null, C.COLLISION_ZONE_RATIO, sides), null);
+  assert(!sides.left?.row && sides.right?.ground && !sides.right?.row, "柱子那一半不是地面，另一半是平地");
+});
+test("仰拍：中間沒有往前延伸的地面就不判斷", () => {
+  const d = stepDisparity(y => 0.05 + 0.001 * y);                  // 幾乎都是遠處（天空、燈桿），越下面只近一點點
+  eq(findGroundSteps(d, 133), null);
+});
+test("偵測器：手機明顯傾斜時不判斷地面高低差，也不報斑馬線", () => {
+  const det = new HazardDetector(null, null);
+  det.tiltOk = false;
+  eq(det.depthHazards(stepDisparity(stairsDown), [], 320, 640, 480), []);
+  eq(det.groundFlat, false);
+  det.tiltOk = true;
+  det.depthHazards(stepDisparity((y, b) => b / 1.2), [], 320, 640, 480);
+  eq(det.groundFlat, true);
+});
+test("紅綠燈：好幾個燈同一個顏色才說，一紅一綠就不說", () => {
+  eq(pickLight([{ color: "red" }, { color: null }, { color: "red" }]), "red");
+  eq(pickLight([{ color: "green" }, { color: "red" }]), null);
+  eq(pickLight([{ color: null }]), null);
+  eq(pickLight([]), null);
 });
 test("高低差的語音", () => {
   const e = new AlertEngine();

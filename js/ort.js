@@ -5,7 +5,9 @@
 // 大的那個常常載不起來；不能用 WebGPU 的手機也用不到它，一律用小的。
 const onIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
-const withGpu = !onIOS && typeof navigator !== "undefined" && !!navigator.gpu;
+// iOS 26 的 Safari 有 WebGPU 了，但還沒在 iPhone 實機確認：網址加 ?gpu=1 才在 iPhone 試（深度模型、斑馬線、高低差都要靠它）
+const forceGpu = new URLSearchParams(globalThis.location?.search || "").has("gpu");
+const withGpu = (!onIOS || forceGpu) && typeof navigator !== "undefined" && !!navigator.gpu;
 const ort = await import(withGpu ? "../vendor/ort/ort.webgpu.min.mjs" : "../vendor/ort/ort.wasm.min.mjs");
 
 export { ort };

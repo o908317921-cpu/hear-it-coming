@@ -884,5 +884,5 @@ function showQr() {
   $("pageUrl").textContent = location.href;
   showQr();
   // iPhone 與沒有 WebGPU 的手機不跑深度模型：開始畫面不能說會提醒頭上的障礙
-  if (isIOS || !navigator.gpu) $("featureOverhead").hidden = true;
+  if ((isIOS && !new URLSearchParams(location.search).has("gpu")) || !navigator.gpu) $("featureOverhead").hidden = true;
 })();

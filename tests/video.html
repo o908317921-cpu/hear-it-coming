@@ -23,6 +23,7 @@ canvas{max-width:100%;margin-top:12px;border:1px solid #2B3035}
 <input type="file" id="file" accept="video/*" multiple>
 <label for="labels">標註檔（實驗二用，可不選）：CSV 欄位「檔名,應警示,碰撞時刻,方向」，例如 <code>clip01.mp4,1,4.2,中</code>、<code>clip02.mp4,0,,</code>。應警示填 1／0；方向填 左／中／右。應警示的片段要在碰撞時刻之前響才算正確警示。</label>
 <input type="file" id="labels" accept=".csv,text/csv">
+<div><button id="template" disabled>用選好的影片產生標註範本.csv</button></div>
 <label for="fps">每秒分析幾幀（建議與錄影相同，常見 30）</label>
 <input type="number" id="fps" value="30" min="1" max="120">
 <label for="tc">真實碰撞時刻（秒，實驗一用，只選一段影片時有效，可留空）：側拍算出物體到達鏡頭的時間，填了會算 TTC 平均絕對誤差（只算真實 TTC ≤ 3 秒的幀）</label>

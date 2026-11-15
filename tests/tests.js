@@ -3,7 +3,7 @@
 import { C, applyUserSettings, classLabel, targetClassIds, COCO_NAMES } from "../js/config.js";
 import * as A from "../js/analysis.js";
 import { AlertEngine, alertLevelOf, sceneSummary, speedDescription, frameSummary } from "../js/alerts.js";
-import { toCsv, parseOverrides, frameTimes, ttcError, parseLabels, clipAlert, evaluateClips } from "./video-core.js";
+import { toCsv, parseOverrides, frameTimes, ttcError, parseLabels, clipAlert, evaluateClips, labelTemplate } from "./video-core.js";
 import { ByteTracker } from "../js/tracker.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
@@ -1230,6 +1230,8 @@ test("實驗二：標註檔、每段第一句警報、精確率／召回率／F1
   eq(r.unlabeled, ["z.mp4"]);
   eq(r.leadByTier, { 注意: { n: 1, mean: 2.5 }, 危險: { n: 1, mean: 1 }, 停: { n: 0, mean: null } });
   eq(r.rows.find(x => x.檔名 === "b.mp4").結果, "漏報（太晚）");
+  eq(labelTemplate(["clip10.mp4", "clip2.mp4"]), ["檔名,應警示,碰撞時刻,方向", "clip2.mp4,,,", "clip10.mp4,,,"].join("\n"));   // 數字照大小排
+  eq(parseLabels(labelTemplate(["x.mp4"]).replace("x.mp4,,,", "x.mp4,1,,")).get("x").alert, true);   // 範本填完就能直接讀
 });
 test("消融：ABLATE_TRACKER 時改用簡單配對，同一個物體仍是同一個編號", () => {
   const keep = C.ABLATE_TRACKER;

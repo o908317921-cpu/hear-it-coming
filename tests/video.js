@@ -6,7 +6,7 @@ import { YoloSegmenter } from "../js/yolo.js";
 import { DepthWorker } from "../js/depth.js";
 import { HazardDetector } from "../js/detector.js";
 import { AlertEngine, alertLevelOf } from "../js/alerts.js";
-import { toCsv, parseOverrides, frameTimes, ttcError, parseLabels, clipAlert, evaluateClips } from "./video-core.js";
+import { toCsv, parseOverrides, frameTimes, ttcError, parseLabels, clipAlert, evaluateClips, labelTemplate } from "./video-core.js";
 
 const $ = id => document.getElementById(id);
 const log = t => { $("log").textContent = t; };
@@ -217,7 +217,8 @@ async function analyzeOne(file, fps, yolo, depth, label) {
   }
 }
 
-$("file").onchange = () => { $("run").disabled = !$("file").files.length; };
+$("file").onchange = () => { $("run").disabled = $("template").disabled = !$("file").files.length; };
+$("template").onclick = () => download("標註範本.csv", labelTemplate([...$("file").files].map(f => f.name)));
 $("run").onclick = () => run().catch(e => { console.error(e); log("錯誤：" + (e.message || e)); });
 $("stop").onclick = () => { stopRequested = true; };
 $("dlTracks").onclick = () => download(`${baseName}_每幀物體.csv`, toCsv(trackRows));

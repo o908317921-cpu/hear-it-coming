@@ -116,3 +116,8 @@ export function evaluateClips(clips, labels) {
            leadByTier: Object.fromEntries(TIERS.map(t => [t, { n: tierLeads[t].length, mean: tierLeads[t].length ? r3(tierLeads[t].reduce((a, b) => a + b, 0) / tierLeads[t].length) : null }])),
            rows, unlabeled };
 }
+
+// 標註範本：選好的影片檔名先填好，其他欄留空讓人填（實驗二要標 180 段，不用一個個打檔名）
+export function labelTemplate(names) {
+  return ["檔名,應警示,碰撞時刻,方向", ...[...names].sort((a, b) => a.localeCompare(b, "zh-Hant", { numeric: true })).map(n => `${n},,,`)].join("\n");
+}

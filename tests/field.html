@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真實照片測試</title>
+<style>
+body{margin:0;padding:16px;background:#0E1416;color:#EEF3F2;font:14px/1.6 system-ui,"Microsoft JhengHei",sans-serif}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #2B3035;padding:4px 6px;text-align:left;vertical-align:top}
+.ok{color:#8BE39A}.bad{color:#FFB4A8}.skip{color:#98A1A9}
+</style>
+</head>
+<body>
+<h1>盲人尋道｜真實照片測試（紅綠燈、地面高低差、斑馬線）</h1>
+<p>照片放在 <code>tests/field-photos/</code>（不進 git），用真實的 YOLO 與深度模型跑。正確答案是人工標的。</p>
+<pre id="log"></pre>
+<table id="out"><thead><tr><th>照片</th><th>項目</th><th>正確答案</th><th>系統結果</th><th>對錯</th><th>細節</th></tr></thead><tbody></tbody></table>
+<script type="module" src="field.js"></script>
+</body>
+</html>

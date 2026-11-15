@@ -586,7 +586,7 @@ export class HazardDetector {
     // 鏡頭被擋住時不判讀燈號與斑馬線
     this.sceneSpeech = unseeing ? [] : this.scene.update({
       signals: detectionFrame ? this.signals : [], rgba: frame.imageData.data,
-      gray: C.CROSSWALK_ENABLED ? gray : null, w, h, pathCenterX: pathCenterX ?? w / 2, now,
+      crosswalk: C.CROSSWALK_ENABLED && !this.staticHazards.some(hz => hz.kind === "level"), w, h, pathCenterX: pathCenterX ?? w / 2, now,
     });
     return results;
   }

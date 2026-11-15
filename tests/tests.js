@@ -1106,51 +1106,52 @@ test("下載：一直連不上才放棄，檔案不存在馬上放棄", async ()
 });
 
 // ---------- 科展版：地面高低差、紅綠燈、斑馬線、實測紀錄 ----------
-// 合成深度圖：鏡頭高 1.2 公尺，逆深度 = (列 − 地平線) ÷ 地面在鏡頭下幾公尺，再乘比例加位移（模擬 Depth Anything 的仿射輸出）
-function stepDisparity(groundBelow, w = 266, h = 196, seed = 1) {
+// 合成深度圖：鏡頭高 1.2 公尺，逆深度 = (列 − 地平線) ÷ 地面在鏡頭下幾公尺，再乘比例加位移
+// curve：模擬 Depth Anything 在平地上也會彎（真實照片實測：近處飽和，越下面增加得越慢）
+function stepDisparity(groundBelow, { w = 266, h = 196, seed = 1, curve = 0 } = {}) {
   const data = new Float32Array(w * h);
   let r = seed;
   const noise = () => { r = (r * 16807) % 2147483647; return (r / 2147483647 - 0.5) * 0.01; };
   for (let y = 0; y < h; y++) {
     const below = Math.max(y - h / 2, 0.5);
-    for (let x = 0; x < w; x++) data[y * w + x] = 3 * groundBelow(y, below) + 0.7 + noise();
+    const v = groundBelow(y, below);
+    for (let x = 0; x < w; x++) data[y * w + x] = 3 * (curve ? v - curve * v * v : v) + 0.7 + noise();
   }
   return { data, width: w, height: h };
 }
 const EDGE = 150;
+const stairsDown = (y, b) => b / (y < EDGE ? 2.2 : 1.2);        // 邊緣後面的地面低 1 公尺（往下的樓梯）
 test("平地沒有高低差（含仿射位移與雜訊）", () => eq(findGroundSteps(stepDisparity((y, b) => b / 1.2), 133), null));
-test("往下 20 公分的落差", () => {
-  const st = findGroundSteps(stepDisparity((y, b) => b / (y < EDGE ? 1.4 : 1.2)), 133);
-  eq(st && st.kind, "drop");
-  assert(Math.abs(st.row - (EDGE - 1)) <= 2, `邊緣列 ${st.row}`);
+test("平地：深度模型輸出是彎的也不誤報（真實照片的情況）", () => {
+  eq(findGroundSteps(stepDisparity((y, b) => b / 1.2, { curve: 0.006 }), 133), null);
 });
-test("往上的台階：先一段垂直面，上面是較高的地面", () => {
-  const face = (EDGE - 100) / 1.2;     // 邊緣處的逆深度，垂直面上不變
-  const st = findGroundSteps(stepDisparity((y, b) => (y >= EDGE ? b / 1.2 : y >= EDGE - 8 ? face : b / 1.03)), 133);
-  eq(st && st.kind, "step");
+test("往下的落差：邊緣處突然變遠", () => {
+  const st = findGroundSteps(stepDisparity(stairsDown), 133);
+  eq(st && st.kind, "level");
+  assert(Math.abs(st.row - EDGE) <= 4, `邊緣列 ${st.row}`);
 });
-test("牆不算台階（交給障礙物偵測）", () => {
-  const face = (EDGE - 100) / 1.2;
-  eq(findGroundSteps(stepDisparity((y, b) => (y >= EDGE ? b / 1.2 : face * (1 + (EDGE - y) * 0.03))), 133), null);
+test("往上的台階：一段立面（逆深度不變）", () => {
+  const face = (EDGE - 100) / 1.2;     // 邊緣處的逆深度，立面上不變
+  const st = findGroundSteps(stepDisparity((y, b) => (y >= EDGE ? b / 1.2 : y >= EDGE - 14 ? face : b / 1.03)), 133);
+  eq(st && st.kind, "level");
 });
 test("行人擋住的部分不算落差", () => {
-  const d = stepDisparity((y, b) => b / (y < EDGE ? 1.4 : 1.2));
+  const d = stepDisparity(stairsDown);
   const exclude = new Uint8Array(d.width * d.height).fill(1);
   eq(findGroundSteps(d, 133, exclude), null);
 });
-test("偵測器：落差變成靜態障礙，連續兩次才警示", () => {
+test("偵測器：高低差變成靜態障礙，連續兩次才警示", () => {
   const det = new HazardDetector(null, null);
-  const disp = stepDisparity((y, b) => b / (y < EDGE ? 1.4 : 1.2));
-  const found = det.depthHazards(disp, [], 320, 640, 480);
-  eq(found.map(f => f.kind), ["drop"]);
-  assert(found[0].distanceM > 0 && found[0].distanceM <= C.STEP_ALERT_DISTANCE_M);
-  det.confirmStatic(found, 0); eq(det.staticState.get("drop").confirmed, false);
-  det.confirmStatic(found, 0.7); eq(det.staticState.get("drop").confirmed, true);
+  const found = det.depthHazards(stepDisparity(stairsDown), [], 320, 640, 480);
+  eq(found.map(f => f.kind), ["level"]);
+  assert(found[0].distanceM > 0 && found[0].distanceM <= C.STEP_ALERT_DISTANCE_M, `距離 ${found[0].distanceM}`);
+  det.confirmStatic(found, 0); eq(det.staticState.get("level").confirmed, false);
+  det.confirmStatic(found, 0.7); eq(det.staticState.get("level").confirmed, true);
 });
-test("落差的語音", () => {
+test("高低差的語音", () => {
   const e = new AlertEngine();
-  const u = e.update([], 0, false, { staticHazards: [{ kind: "drop", label: C.STATIC_TEXT.drop, box: [200, 300, 440, 340], distanceM: 4, horizontalPosition: "center" }] });
-  eq(texts(u), ["正前方，地面往下有落差"]);
+  const u = e.update([], 0, false, { staticHazards: [{ kind: "level", label: C.STATIC_TEXT.level, box: [200, 300, 440, 340], distanceM: 4, horizontalPosition: "center" }] });
+  eq(texts(u), ["正前方，地面有高低差"]);
 });
 
 function lightImage(rgb, w = 30, h = 70) {
@@ -1169,16 +1170,22 @@ test("紅綠燈顏色", () => {
   eq(trafficLightColor(lightImage(null), 30, [0, 0, 30, 70]), null);                 // 沒亮
 });
 
-function roadGray(stripeRows, w = 320, h = 240) {
-  const g = new Uint8Array(w * h).fill(90);
-  for (let y = Math.floor(h * 0.55); y < h; y++) g.fill(stripeRows(y) ? 210 : 70, y * w, (y + 1) * w);
-  return g;
+// 路面：下半部畫橫條（white 時是白漆，否則是 color 色的漆）
+function roadRGBA(stripeRows, { w = 320, h = 240, color = [210, 210, 210] } = {}) {
+  const a = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const c = y >= h * 0.45 && stripeRows(y) ? color : [70, 70, 72];
+    a.set([...c, 255], (y * w + x) * 4);
+  }
+  return a;
 }
-test("斑馬線：亮暗交錯的橫條", () => {
-  assert(crosswalkStripes(roadGray(y => Math.floor(y / 12) % 2 === 0), 320, 240, 160) >= C.CROSSWALK_MIN_STRIPES);
-  eq(crosswalkStripes(roadGray(() => false), 320, 240, 160), 0);   // 一般柏油路
-  const vertical = new Uint8Array(320 * 240).fill(90);              // 直條紋（欄杆影子）：每一列一半亮一半暗
-  for (let i = 0; i < vertical.length; i++) if (Math.floor((i % 320) / 10) % 2) vertical[i] = 210;
+const zebra = y => Math.floor(y / 12) % 2 === 0;
+test("斑馬線：好幾條寬扁的白色橫條", () => {
+  assert(crosswalkStripes(roadRGBA(zebra), 320, 240, 160) >= C.CROSSWALK_MIN_STRIPES);
+  eq(crosswalkStripes(roadRGBA(() => false), 320, 240, 160), 0);                           // 一般柏油路
+  eq(crosswalkStripes(roadRGBA(zebra, { color: [230, 200, 40] }), 320, 240, 160), 0);      // 黃色標線不是白漆
+  const vertical = new Uint8ClampedArray(320 * 240 * 4);                                    // 直條紋（欄杆影子）
+  for (let i = 0; i < 320 * 240; i++) vertical.set(Math.floor((i % 320) / 10) % 2 ? [210, 210, 210, 255] : [70, 70, 72, 255], i * 4);
   eq(crosswalkStripes(vertical, 320, 240, 160), 0);
 });
 test("燈號：連續看到才說，改變時馬上說，不重複", () => {
@@ -1198,10 +1205,13 @@ test("燈號：連續看到才說，改變時馬上說，不重複", () => {
   for (let i = 0; i < 10; i++) said.push(...side.update({ signals: [{ box: [290, 10, 310, 60], score: 0.8 }], rgba: red, w: 320, h: 240, pathCenterX: 160, now: i / 10 }));
   eq(said, []);
 });
-test("斑馬線語音：確認後說一次", () => {
-  const cues = new SceneCues(), g = roadGray(y => Math.floor(y / 12) % 2 === 0), said = [];
-  for (let i = 0; i < 20; i++) said.push(...cues.update({ gray: g, w: 320, h: 240, pathCenterX: 160, now: i / 10 }));
-  eq(said.map(s => s.text), [C.CROSSWALK_TEXT]);
+test("斑馬線語音：確認後說一次；前方有高低差（樓梯）時不判斷", () => {
+  const rgba = roadRGBA(zebra);
+  for (const [crosswalk, want] of [[true, [C.CROSSWALK_TEXT]], [false, []]]) {
+    const cues = new SceneCues(), said = [];
+    for (let i = 0; i < 20; i++) said.push(...cues.update({ rgba, crosswalk, w: 320, h: 240, pathCenterX: 160, now: i / 10 }));
+    eq(said.map(s => s.text), want);
+  }
 });
 test("紅綠燈不進碰撞追蹤", () => eq(targetClassIds().get(COCO_NAMES.indexOf("traffic light")), "traffic light"));
 

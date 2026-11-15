@@ -1,71 +1,64 @@
 // 科展版新增：地面高低差、紅綠燈、斑馬線。
 // 三者都只「說明前方有什麼」，不下指令：系統分不出行人號誌和車輛號誌，也不知道使用者要不要過馬路。
+// 門檻用 Wikimedia Commons 的真實街景照片調過（tests/field.html），但照片不是胸前視角，仍要實地測試。
 import { C } from "./config.js";
 import { median } from "./analysis.js";
 
 // ============================================================
 // 地面高低差（深度圖）
 // ============================================================
-// 平坦地面上，深度圖的逆深度沿著畫面往上是一條直線（針孔相機：逆深度 ∝ 落地點在地平線下幾個像素）。
-// Depth Anything 的輸出跟真正的逆深度只差一個比例和位移（仿射），直線仍是直線。
-// 所以用最下面一段地面擬合一條直線，往上看實際值偏離多少：
-//   往下的落差（路緣往下、台階往下、坑）：邊緣後面是更低的地面，看起來比直線遠 → 比值 < 1，而且之後一直偏低
-//   往上的台階（路緣往上、樓梯往上）：先是一段垂直面（逆深度不變），上面是較高的地面 → 比值 > 1 但不會一路變大
-//   牆、柱子：比值一路變大，交給原本的「障礙物」偵測，這裡不報
-// 比值 =（實際 − 地平線處的直線值）÷（直線值 − 地平線處的直線值），抵掉仿射的位移，平地上恆為 1。
-// disparity：{data, width, height}；回傳 null 或 {kind: "drop"|"step", row, box, centerX, ratio}
-export function findGroundSteps(disparity, pathCenterX, exclude = null, pathRatio = C.COLLISION_ZONE_RATIO) {
+// 看行走路徑中間那一條，每一列逆深度的中位數，由上往下應該平順地變大（越下面越近）。
+// 真實照片實測發現 Depth Anything 的輸出在平地上也是彎的：「擬合直線看偏離多少」在 8 張平地照片上全部誤報。
+// 改看局部變化才分得開：
+//   跳變：往下幾列之內突然變近很多（比平常的坡度陡 STEP_JUMP_RATIO 倍以上）＝邊緣（落差、台階的邊）
+//   平台：一段距離內逆深度幾乎不變（坡度不到平常的 STEP_FLAT_RATIO）＝立起來的面（台階、路緣的側面）
+// 往上還是往下在實測裡分不準（往上的樓梯常被判成跳變），所以只說「地面有高低差」。
+// disparity：{data, width, height}；回傳 null 或 {kind: "level", row, box, centerX, reason}
+// debug：傳入物件時填入每一列的數值（實測照片調門檻用）
+export function findGroundSteps(disparity, pathCenterX, exclude = null, pathRatio = C.COLLISION_ZONE_RATIO, debug = null) {
   const { data, width: w, height: h } = disparity;
   const half = w * pathRatio / 2;
   const x0 = Math.floor(Math.max(0, pathCenterX - half)), x1 = Math.floor(Math.min(w, pathCenterX + half));
   if (x1 - x0 < 3) return null;
-  const horizon = h * C.STEP_HORIZON_RATIO;
-  const profile = new Float64Array(h).fill(NaN);
-  for (let y = Math.ceil(horizon); y < h; y++) {
+  const y0 = Math.floor(h * C.STEP_SEARCH_TOP_RATIO), y1 = Math.floor(h * C.STEP_SEARCH_BOTTOM_RATIO);
+  // 幾列平均一次，去掉單列雜訊；窗內有被擋住的列就不算
+  const k = Math.max(2, Math.round(h * C.STEP_WINDOW_RATIO));
+  const raw = new Float64Array(h).fill(NaN);
+  for (let y = Math.max(0, y0 - k); y < h; y++) {
     const row = [];
     for (let x = x0; x < x1; x++) if (!exclude || !exclude[y * w + x]) row.push(data[y * w + x]);
-    if (row.length >= (x1 - x0) * 0.5) profile[y] = median(row);
+    if (row.length >= (x1 - x0) * 0.5) raw[y] = median(row);
   }
-  // 參考地面：最下面一段，最小平方法擬合直線 p = a·y + b
-  const refTop = Math.floor(h * (1 - C.STEP_REF_RATIO));
-  let n = 0, sy = 0, sp = 0, syy = 0, syp = 0;
-  for (let y = refTop; y < h; y++) {
-    if (Number.isNaN(profile[y])) continue;
-    n++; sy += y; sp += profile[y]; syy += y * y; syp += y * profile[y];
+  const p = new Float64Array(h).fill(NaN);
+  for (let y = y0; y < h; y++) {
+    let sum = 0, n = 0;
+    for (let j = y - (k >> 1); j < y - (k >> 1) + k; j++) if (j >= 0 && j < h && !Number.isNaN(raw[j])) { sum += raw[j]; n++; }
+    if (n === k) p[y] = sum / n;
   }
-  if (n < (h - refTop) * 0.6) return null;            // 參考地面大多被擋住
-  const a = (n * syp - sy * sp) / (n * syy - sy * sy), b = (sp - a * sy) / n;
-  if (!(a > 0)) return null;                           // 越下面越近才是地面；不是的話（鏡頭朝天、對著牆）不判斷
-  let sse = 0, sst = 0;
-  for (let y = refTop; y < h; y++) {
-    if (Number.isNaN(profile[y])) continue;
-    sse += (profile[y] - (a * y + b)) ** 2; sst += (profile[y] - sp / n) ** 2;
+  const bottom = p[y1 - 1];
+  if (!(bottom > 0)) return null;
+  const slope = new Float64Array(h).fill(NaN);            // 往下 k 列，逆深度變大多少
+  for (let y = y0; y + k < y1; y++) slope[y] = p[y + k] - p[y];
+  // 平常的坡度：近處地面（逆深度超過最下面的一半）的中位數
+  const near = [];
+  for (let y = y0; y + k < y1; y++) if (p[y] > 0.5 * bottom && !Number.isNaN(slope[y])) near.push(slope[y]);
+  const ref = near.length ? median(near) : NaN;
+  if (debug) Object.assign(debug, { ref, bottom, k });
+  if (!(ref > 0)) return null;                             // 越下面沒有越近：不是在看地面
+  const found = (row, reason) => ({ kind: "level", row, reason, centerX: (x0 + x1) / 2,
+                                    box: [x0, Math.max(0, row - 2 * k), x1, Math.min(h, row + 2 * k)] });
+  let jumpY = -1, jump = 0;
+  for (let y = y0; y + k < y1; y++) {
+    if (p[y] > C.STEP_NEAR_FRAC * bottom && slope[y] > jump) { jump = slope[y]; jumpY = y; }
   }
-  if (sst <= 0 || 1 - sse / sst < C.STEP_REF_MIN_R2) return null;   // 參考段本身就不平，沒有基準
-  const base = a * horizon + b;
-  const ratioAt = y => (profile[y] - base) / (a * y + b - base);
-
-  // 從參考段往上找：連續 minRows 列都偏離超過門檻，第一列就是邊緣
-  const minRows = Math.max(2, Math.round(h * C.STEP_MIN_ROWS_RATIO));
-  const searchTop = Math.ceil(h * C.STEP_SEARCH_TOP_RATIO);
-  let run = [], runKind = null;
-  for (let y = refTop - 1; y >= searchTop; y--) {
-    if (Number.isNaN(profile[y])) { run = []; runKind = null; continue; }
-    const r = ratioAt(y);
-    const kind = r < 1 - C.STEP_DROP_RATIO ? "drop" : r > 1 + C.STEP_RISE_RATIO ? "step" : null;
-    if (!kind || kind !== runKind) { run = kind ? [[y, r]] : []; runKind = kind; continue; }
-    run.push([y, r]);
-    if (run.length < minRows) continue;
-    // 再往上多看幾列：落差後面要一直偏低；台階上面要停在某個比值（牆會一路變大）
-    const above = [];
-    for (let k = y - 1; k >= Math.max(searchTop, y - minRows * 2); k--) if (!Number.isNaN(profile[k])) above.push(ratioAt(k));
-    const all = run.map(([, v]) => v).concat(above);
-    const mid = median(all);
-    if (kind === "drop" && mid >= 1 - C.STEP_DROP_RATIO) { run = []; runKind = null; continue; }
-    if (kind === "step" && (mid > C.STEP_RISE_MAX_RATIO || Math.max(...all) > C.STEP_RISE_MAX_RATIO * 1.15)) return null;
-    const edge = run[0][0];
-    return { kind, row: edge, ratio: mid, centerX: (x0 + x1) / 2,
-             box: [x0, Math.max(0, edge - minRows * 2), x1, Math.min(h, edge + minRows)] };
+  if (debug) debug.jump = jump / ref;
+  if (jumpY >= 0 && jump > C.STEP_JUMP_RATIO * ref) return found(jumpY + (k >> 1), `跳變 ${(jump / ref).toFixed(1)} 倍`);
+  const minRun = Math.max(2, Math.round(h * C.STEP_FLAT_RUN_RATIO));
+  let run = 0;
+  for (let y = y1 - k - 1; y >= y0; y--) {
+    if (p[y] > C.STEP_FLAT_NEAR_FRAC * bottom && slope[y] < C.STEP_FLAT_RATIO * ref) {
+      if (++run >= minRun) return found(y + run - 1, `平台 ${run} 列`);   // 平台最下面一列：立面和地面的交界
+    } else run = 0;
   }
   return null;
 }
@@ -110,45 +103,70 @@ export function trafficLightColor(rgba, frameWidth, box) {
 }
 
 // ============================================================
-// 斑馬線：路徑前方的地面上，亮暗交錯的橫條
+// 斑馬線：路徑前方的地面上，好幾條又寬又扁、上下疊著的白色色塊
 // ============================================================
-// gray：灰階畫面；回傳亮條數（≥ CROSSWALK_MIN_STRIPES 才算斑馬線）
-export function crosswalkStripes(gray, w, h, pathCenterX) {
+// 真實照片實測：「每一欄亮暗交錯」連樓梯、磚牆、樹影都算；「整列都亮」又抓不到斜的斑馬線。
+// 改成找白漆：夠亮、不鮮豔，連成一塊後要夠寬、夠扁，而且好幾塊上下疊著。
+// rgba：畫面像素；回傳白色橫條數（≥ CROSSWALK_MIN_STRIPES 才算斑馬線）
+export function crosswalkStripes(rgba, w, h, pathCenterX) {
   const half = w * C.CROSSWALK_WIDTH_RATIO / 2;
   const x0 = Math.floor(Math.max(0, pathCenterX - half)), x1 = Math.floor(Math.min(w, pathCenterX + half));
   const y0 = Math.floor(h * C.CROSSWALK_TOP_RATIO);
-  const rows = h - y0, cols = x1 - x0;
-  if (rows < 10 || cols < 10) return 0;
-  const mean = new Float64Array(rows), bright = new Float64Array(rows);
-  for (let r = 0; r < rows; r++) {
-    let s = 0;
-    for (let x = x0; x < x1; x++) s += gray[(y0 + r) * w + x];
-    mean[r] = s / cols;
+  const bw = x1 - x0, bh = h - y0;
+  if (bw < 10 || bh < 10) return 0;
+  const val = new Uint8Array(bw * bh), sat = new Float32Array(bw * bh), hist = new Uint32Array(256);
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      const i = ((y0 + y) * w + x0 + x) * 4;
+      const mx = Math.max(rgba[i], rgba[i + 1], rgba[i + 2]), mn = Math.min(rgba[i], rgba[i + 1], rgba[i + 2]);
+      val[y * bw + x] = mx; sat[y * bw + x] = mx ? (mx - mn) / mx : 0; hist[mx]++;
+    }
   }
-  const sorted = [...mean].sort((p, q) => p - q);
-  const lo = sorted[Math.floor(rows * 0.15)], hi = sorted[Math.floor(rows * 0.85)];
+  const pct = q => { let acc = 0; for (let v = 0; v < 256; v++) if ((acc += hist[v]) >= q * bw * bh) return v; return 255; };
+  const lo = pct(0.2), hi = pct(0.9);
   if (hi - lo < C.CROSSWALK_MIN_CONTRAST) return 0;
-  const mid = (lo + hi) / 2;
-  // 亮條要橫貫整段路徑（白漆），不是一小塊反光：這一列大部分的點都要比中間值亮
-  for (let r = 0; r < rows; r++) {
-    let n = 0;
-    for (let x = x0; x < x1; x++) if (gray[(y0 + r) * w + x] > mid) n++;
-    bright[r] = n / cols;
-  }
-  const minBand = Math.max(2, Math.round(h * 0.01));
-  let stripes = 0, darks = 0, state = null, len = 0;
-  const close = () => {
-    if (len >= minBand) { if (state === "bright") stripes++; else if (state === "dark") darks++; }
+  const cut = lo + 0.6 * (hi - lo);
+  let mask = new Uint8Array(bw * bh);
+  for (let i = 0; i < mask.length; i++) mask[i] = val[i] > cut && sat[i] < C.CROSSWALK_MAX_SAT ? 1 : 0;
+  // 先侵蝕再膨脹（3×3）：去掉零星的亮點與細線
+  const morph = (src, erode) => {
+    const dst = new Uint8Array(src.length);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      let all = 1, any = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy, xx = x + dx;
+        const v = yy >= 0 && yy < bh && xx >= 0 && xx < bw ? src[yy * bw + xx] : 0;
+        all &= v; any |= v;
+      }
+      dst[y * bw + x] = erode ? all : any;
+    }
+    return dst;
   };
-  for (let r = 0; r < rows; r++) {
-    const s = bright[r] >= C.CROSSWALK_ROW_FILL ? "bright" : bright[r] <= 1 - C.CROSSWALK_ROW_FILL ? "dark" : null;
-    if (s === state) { len++; continue; }
-    close();
-    state = s; len = 1;
+  mask = morph(morph(mask, true), false);
+  // 連通區域，記下每塊的外框
+  const seen = new Uint8Array(mask.length), stack = [], stripes = [];
+  for (let start = 0; start < mask.length; start++) {
+    if (!mask[start] || seen[start]) continue;
+    let minX = bw, maxX = -1, minY = bh, maxY = -1;
+    seen[start] = 1; stack.push(start);
+    while (stack.length) {
+      const i = stack.pop(), x = i % bw, y = (i - x) / bw;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      for (const j of [x > 0 ? i - 1 : -1, x < bw - 1 ? i + 1 : -1, y > 0 ? i - bw : -1, y < bh - 1 ? i + bw : -1]) {
+        if (j >= 0 && mask[j] && !seen[j]) { seen[j] = 1; stack.push(j); }
+      }
+    }
+    const ww = maxX - minX + 1, hh = maxY - minY + 1;
+    if (ww >= C.CROSSWALK_MIN_WIDTH_RATIO * bw && hh <= C.CROSSWALK_MAX_ASPECT * ww && hh >= 2) stripes.push([(minY + maxY) / 2, hh]);
   }
-  close();
-  // 亮條之間要有暗條隔開；一整片亮（白牆、陽光）不算
-  return Math.min(stripes, darks + 1);
+  // 上下疊著：中心至少差上一條的高度（同一條被切成兩塊不重複算）
+  stripes.sort((p, q) => p[0] - q[0]);
+  let count = 0, last = null;
+  for (const st of stripes) if (!last || st[0] - last[0] > Math.max(3, last[1] * 0.8)) { count++; last = st; }
+  return count;
 }
 
 // ============================================================
@@ -161,8 +179,9 @@ export class SceneCues {
     this.lights = [];             // 這一幀判讀過的燈（畫面用）
   }
 
-  // signals：[{box, score}]（traffic light）；回傳要念的句子
-  update({ signals = [], rgba = null, gray = null, w, h, pathCenterX, now }) {
+  // signals：[{box, score}]（traffic light）；crosswalk：要不要判斷斑馬線
+  // （前方有地面高低差時不判斷：實測裡樓梯的踏面看起來就像白色橫條）。回傳要念的句子
+  update({ signals = [], rgba = null, crosswalk = false, w, h, pathCenterX, now }) {
     const out = [];
     // ---- 紅綠燈：只看路徑前方附近、夠大的燈；同時看到好幾個時取最大的
     this.lights = [];
@@ -194,9 +213,9 @@ export class SceneCues {
     }
 
     // ---- 斑馬線
-    if (gray) {
+    if (rgba) {
       const X = this.cross;
-      X.votes.push(crosswalkStripes(gray, w, h, pathCenterX) >= C.CROSSWALK_MIN_STRIPES);
+      X.votes.push(crosswalk && crosswalkStripes(rgba, w, h, pathCenterX) >= C.CROSSWALK_MIN_STRIPES);
       if (X.votes.length > C.CROSSWALK_CONFIRM_WINDOW) X.votes.shift();
       const hits = X.votes.filter(Boolean).length;
       if (!X.on && hits >= C.CROSSWALK_CONFIRM_HITS) {

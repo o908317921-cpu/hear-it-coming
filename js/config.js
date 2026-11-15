@@ -124,25 +124,24 @@ export const C = {
   STATIC_MIN_AREA_RATIO: 0.04,
   STATIC_CONFIRM_COUNT: 2,
   STATIC_RELEASE_SEC: 1.0,
-  STATIC_TEXT: { overhead: "頭部高度障礙", obstacle: "前方障礙物", drop: "地面往下落差", step: "地面往上台階" },
+  STATIC_TEXT: { overhead: "頭部高度障礙", obstacle: "前方障礙物", level: "地面高低差" },
   STATIC_ALERT_TEXT: {
     overhead: "{dir}，頭上有障礙",
     obstacle: "{dir}，有障礙物",
-    drop: "{dir}，地面往下有落差",
-    step: "{dir}，地面有台階",
+    level: "{dir}，地面有高低差",
   },
 
   // ---------- 科展版：地面高低差（深度圖，見 js/scene.js）----------
-  // 只用合成深度圖驗證過，真實路緣、台階的門檻要實地測試後調整
+  // 門檻用真實照片調過（平地 8 張零誤報、樓梯台階 7 張抓到 4 張），但照片不是胸前視角，仍要實地測試
   STEP_ENABLED: true,
-  STEP_HORIZON_RATIO: 0.5,        // 地平線在畫面的哪個高度（手機直立固定在胸前）
-  STEP_REF_RATIO: 0.14,           // 最下面這麼多比例的地面當作「平地」基準
-  STEP_REF_MIN_R2: 0.8,           // 基準段要夠像一條直線，否則不判斷（地面本身就不平、被擋住）
-  STEP_SEARCH_TOP_RATIO: 0.62,    // 最遠只看到畫面這個高度：再上去離地平線太近，深度雜訊大，而且太遠
-  STEP_MIN_ROWS_RATIO: 0.03,      // 至少連續這麼多比例的列都偏離才算，不是一兩列雜訊
-  STEP_DROP_RATIO: 0.1,           // 比平地遠超過這個比例算往下的落差（15 公分路緣在 1.2 公尺高的鏡頭下約 11%）
-  STEP_RISE_RATIO: 0.1,           // 比平地近超過這個比例算往上的台階
-  STEP_RISE_MAX_RATIO: 1.6,       // 再更近就是牆或柱子，交給障礙物偵測
+  STEP_SEARCH_TOP_RATIO: 0.35,    // 只看畫面這個高度以下（再上去大多是天空、建築）
+  STEP_SEARCH_BOTTOM_RATIO: 0.95, // 最下緣幾列常有鏡頭邊緣的雜訊
+  STEP_WINDOW_RATIO: 0.02,        // 幾列平均一次、往下幾列算一次坡度
+  STEP_JUMP_RATIO: 3.0,           // 坡度比平常陡這麼多倍算邊緣（實測平地最多約 2.3 倍）
+  STEP_NEAR_FRAC: 0.3,            // 只看逆深度超過最下面這麼多比例的列（太遠的背景不算）
+  STEP_FLAT_RATIO: 0.25,          // 坡度不到平常的這個比例算「立起來的面」
+  STEP_FLAT_RUN_RATIO: 0.04,      // 連續這麼多比例的列都是平台才算
+  STEP_FLAT_NEAR_FRAC: 0.4,
   STEP_ALERT_DISTANCE_M: 8.0,     // 邊緣比這個遠不報
 
   // ---------- 相機自體運動補償（陀螺儀＋背景位移比對）----------
@@ -304,19 +303,23 @@ export const C = {
   SIGNAL_MIN_CONF: 0.35,
   SIGNAL_MAX_OFFSET_RATIO: 0.35,  // 燈的中心離行走路徑中線超過畫面寬度的這個比例不算（旁邊路口的燈）
   SIGNAL_MIN_HEIGHT_RATIO: 0.025, // 太小的燈顏色分不準
-  SIGNAL_MIN_VALUE: 0.55,         // 夠亮才算亮著的燈
-  SIGNAL_MIN_SAT: 0.4,
-  SIGNAL_MIN_LIT_SHARE: 0.04,     // 亮燈的顏色至少佔框的這個比例
+  // 真實照片：亮燈（尤其行人號誌的小人）只佔燈框 1～3%，中心還常常過曝成白色
+  SIGNAL_MIN_VALUE: 0.35,         // 夠亮才算亮著的燈
+  SIGNAL_MIN_SAT: 0.35,
+  SIGNAL_MIN_LIT_SHARE: 0.008,    // 亮燈的顏色至少佔框的這個比例（而且要是第二多顏色的 2 倍）
   SIGNAL_CONFIRM_WINDOW: 6,
   SIGNAL_CONFIRM_HITS: 4,         // 最近 6 幀至少 4 幀同一個顏色才說
   SIGNAL_REPEAT_SEC: 20.0,        // 同一個燈號隔這麼久才再提醒（燈號改變時馬上說）
   SIGNAL_FORGET_SEC: 10.0,
   SIGNAL_TEXT: { red: "前方紅燈", yellow: "前方黃燈", green: "前方綠燈" },
   CROSSWALK_ENABLED: true,
-  CROSSWALK_TOP_RATIO: 0.55,      // 只看畫面下面這一段地面
-  CROSSWALK_WIDTH_RATIO: 0.5,
-  CROSSWALK_MIN_CONTRAST: 45,     // 亮條與暗條的灰階差
-  CROSSWALK_ROW_FILL: 0.75,       // 一列至少這麼多的點是亮的才算白漆（一小塊反光不算）
+  // 門檻用真實照片調過：標註的 13 張 11 張對，不是斑馬線的路面零誤報
+  CROSSWALK_TOP_RATIO: 0.45,      // 只看畫面下面這一段地面
+  CROSSWALK_WIDTH_RATIO: 0.6,
+  CROSSWALK_MIN_CONTRAST: 45,     // 亮處與暗處的亮度差
+  CROSSWALK_MAX_SAT: 0.25,        // 白漆不鮮豔
+  CROSSWALK_MIN_WIDTH_RATIO: 0.2, // 一條白漆至少有看的範圍這麼寬
+  CROSSWALK_MAX_ASPECT: 0.35,     // 而且要扁（高不到寬的這個比例）
   CROSSWALK_MIN_STRIPES: 3,
   CROSSWALK_CONFIRM_WINDOW: 10,
   CROSSWALK_CONFIRM_HITS: 6,

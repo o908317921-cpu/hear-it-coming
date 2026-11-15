@@ -24,7 +24,7 @@ export class DepthWorker {
   start() {
     if (this.worker) return;
     try {
-      this.worker = new Worker(new URL(`./depth-worker.js${location.search}`, import.meta.url), { type: "module" })   // ?gpu=1 等網址參數要傳給背景執行緒;
+      this.worker = new Worker(new URL(`./depth-worker.js${location.search}`, import.meta.url), { type: "module" })   // ?nogpu 等網址參數要傳給背景執行緒;
     } catch (e) {
       this.error = `深度模型無法使用，已停用頭部高度障礙偵測：${e.message || e}`;
       return;

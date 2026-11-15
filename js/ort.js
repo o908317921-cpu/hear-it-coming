@@ -1,13 +1,23 @@
 // ONNX Runtime Web：在瀏覽器裡執行 YOLO 與深度模型。
 // 有 WebGPU（顯示晶片加速）就用 WebGPU，沒有就用 WASM（CPU）。主畫面與深度背景執行緒共用這個檔案。
 // 執行環境放在自己的網站（onnxruntime-web 1.20.1），學校或公司網路擋外部網站時也能用。
-// 有兩種：含 WebGPU 的（wasm 21 MB）與純 CPU 的（wasm 約一半大）。iPhone 的瀏覽器可用來編譯 wasm 的記憶體很少，
-// 大的那個常常載不起來；不能用 WebGPU 的手機也用不到它，一律用小的。
+// 有兩種：含 WebGPU 的（wasm 21 MB）與純 CPU 的（wasm 約一半大）。不能用 WebGPU 的手機用不到大的，一律用小的。
 const onIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
-// iOS 26 的 Safari 有 WebGPU 了，但還沒在 iPhone 實機確認：網址加 ?gpu=1 才在 iPhone 試（深度模型、斑馬線、高低差都要靠它）
-const forceGpu = new URLSearchParams(globalThis.location?.search || "").has("gpu");
-const withGpu = (!onIOS || forceGpu) && typeof navigator !== "undefined" && !!navigator.gpu;
+// iPhone 也用 WebGPU（iOS 26 的 Safari 起有）：深度模型、斑馬線、地面高低差、頭上障礙都要靠它。
+// 以前 iPhone 一律用小的，因為大的常常載不起來。現在改成：上次載入到一半分頁被系統關掉（記憶體不夠，見 app.js
+// 的 blindnav-loading），或近 7 天（app.js 的 LOW_MEMORY_DAYS）進過省記憶體模式，才改用小的 CPU 版，不會一直當在同一個地方。
+// 網址加 ?nogpu 可以手動改用 CPU 版。背景執行緒沒有 localStorage，只看得到網址。
+function lowMemoryMode() {
+  if (new URLSearchParams(globalThis.location?.search || "").has("nogpu")) return true;
+  try {
+    return localStorage.getItem("blindnav-loading") === "1"
+      || Date.now() - Number(localStorage.getItem("blindnav-low-memory") || 0) < 7 * 86400000;
+  } catch (e) {
+    return false;
+  }
+}
+const withGpu = !lowMemoryMode() && typeof navigator !== "undefined" && !!navigator.gpu;
 const ort = await import(withGpu ? "../vendor/ort/ort.webgpu.min.mjs" : "../vendor/ort/ort.wasm.min.mjs");
 
 export { ort };

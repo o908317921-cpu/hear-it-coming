@@ -254,16 +254,16 @@ export function crosswalkStripes(rgba, w, h, pathCenterX, dbg = null) {
     for (let i = 0; i < mask.length; i++) mask[i] = val[i] > cut && sat[i] < C.CROSSWALK_MAX_SAT ? 1 : 0;
   }
   // 先侵蝕再膨脹（3×3）：去掉零星的亮點與細線
+  // 3×3 拆成「左右一次、上下一次」：結果與直接看 3×3 完全相同（邊界外都當 0），運算少一半
   const morph = (src, erode) => {
-    const dst = new Uint8Array(src.length);
+    const tmp = new Uint8Array(src.length), dst = new Uint8Array(src.length);
     for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
-      let all = 1, any = 0;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const yy = y + dy, xx = x + dx;
-        const v = yy >= 0 && yy < bh && xx >= 0 && xx < bw ? src[yy * bw + xx] : 0;
-        all &= v; any |= v;
-      }
-      dst[y * bw + x] = erode ? all : any;
+      const i = y * bw + x, l = x > 0 ? src[i - 1] : 0, r = x < bw - 1 ? src[i + 1] : 0;
+      tmp[i] = erode ? l & src[i] & r : l | src[i] | r;
+    }
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      const i = y * bw + x, u = y > 0 ? tmp[i - bw] : 0, d = y < bh - 1 ? tmp[i + bw] : 0;
+      dst[i] = erode ? u & tmp[i] & d : u | tmp[i] | d;
     }
     return dst;
   };

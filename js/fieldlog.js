@@ -69,8 +69,14 @@ export class FieldLog {
       span.set(e.s, [first, e.t]);
     }
     const minutes = [...span.values()].reduce((acc, [a, b]) => acc + (b - a) / 60000, 0);
+    // 研究主體：碰撞警報發出時，預計還有幾秒會撞上（越大代表越早提醒）。標成誤報的不算
+    const ttc = {};
+    for (const tier of ["注意", "危險", "停"]) {
+      const v = alerts.filter(e => e.kind === tier && e.flag !== "false" && Number.isFinite(e.ttc)).map(e => e.ttc);
+      ttc[tier] = { n: v.length, mean: v.length ? fixed(v.reduce((a, b) => a + b, 0) / v.length) : null };
+    }
     return { sessions: span.size, minutes: fixed(minutes), alerts: alerts.length, falseAlarms: falses, misses,
-             falseRate: alerts.length ? fixed(falses / alerts.length * 100) : null };
+             falseRate: alerts.length ? fixed(falses / alerts.length * 100) : null, ttc };
   }
 
   csv() {

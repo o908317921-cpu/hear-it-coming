@@ -1264,6 +1264,8 @@ test("實測紀錄：誤報標記、漏報、摘要、CSV", () => {
   assert(csv.startsWith("﻿時間,"), "要有 BOM 與標題");
   assert(csv.includes("危險，正前方行人,行人,center,2.3,3,1.2,9.6,"), csv);
   assert(csv.includes("前方紅燈,,,,,,,誤報"), "誤報標在最近那一句");
+  eq(sum.ttc["危險"], { n: 1, mean: 2.3 }, "碰撞時間統計");
+  eq(sum.ttc["停"], { n: 0, mean: null });
 });
 
 export async function run(log, withModel) {

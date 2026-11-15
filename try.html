@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0F1113">
-<title>照片測試｜盲人尋道</title>
+<title>輔助功能照片測試｜盲人尋道</title>
 <link rel="icon" href="data:,">
 <style>
 /* 跟主畫面同一套暗色：中性近黑底、深灰面、細線分隔；唯一的強調色給主要按鈕 */
@@ -48,8 +48,10 @@ a{color:var(--focus)}
 </head>
 <body>
 <main>
-  <h1>照片測試：紅綠燈、地面高低差、斑馬線</h1>
+  <h1>輔助功能照片測試：紅綠燈、地面高低差、斑馬線</h1>
   <p>拍一張或選幾張照片，用跟 App 一樣的模型看系統會說什麼。照片只在這支手機裡分析，不會上傳。</p>
+  <p class="fine">盲人尋道的主體是<b>預計碰撞時間（TTC）</b>：要連續看物體越來越近才算得出來，一張照片測不到，請用 <a href="./">App 本體</a>
+    （開始畫面打開「實測紀錄」，會記下每一次「注意／危險／停」發出時預計還剩幾秒）。這一頁只測靜態就看得出來的輔助功能。</p>
   <div class="pick">
     <label class="btn primary">用鏡頭拍照<input id="camera" type="file" accept="image/*" capture="environment"></label>
     <label class="btn ghost">從相簿選（可多張）<input id="files" type="file" accept="image/*" multiple></label>
@@ -63,7 +65,7 @@ a{color:var(--focus)}
   <div id="results" style="display:flex;flex-direction:column;gap:18px"></div>
   <p class="fine">拍照時請像實際使用一樣：手機直立、鏡頭朝前、大約在胸口高度。單張照片和 App 的差別：App 要連續好幾幀都看到才會說，
     也會用手機傾斜角度擋掉朝天、朝地的畫面；這裡只看一張，所以結果會比 App 敏感一點。沒有顯示晶片加速的手機，App 本身不跑深度模型（沒有地面高低差與斑馬線），這個測試頁仍會算，只是比較慢。</p>
-  <p class="fine"><a href="./">回到盲人尋道</a>　·　<a href="tests/">自動測試</a></p>
+  <p class="fine"><a href="./">回到盲人尋道（碰撞警示）</a>　·　<a href="tests/">自動測試</a></p>
 </main>
 <script>
 if (navigator.serviceWorker) navigator.serviceWorker.register("sw.js").catch(function () {});
@@ -84,12 +86,13 @@ async function ready() {
     await loadSettings();
     C.DEPTH_ON_WASM = true;                      // 這一頁只算單張照片，慢一點沒關係
     status("下載並載入辨識模型…");
-    yolo = await YoloSegmenter.load(p => status(`下載辨識模型 ${Math.round(p * 100)}%`));
+    const pct = p => (Number.isFinite(p) ? ` ${Math.round(p * 100)}%` : "中…");   // 網站沒給檔案大小時沒有百分比
+    yolo = await YoloSegmenter.load(p => status(`下載辨識模型${pct(p)}`));
     status("下載並載入深度模型…");
     depth = new DepthWorker();
     depth.start();
     while (!depth.ready && !depth.error) {
-      status(`下載深度模型 ${Math.round(depth.progress * 100)}%`);
+      status(`下載深度模型${pct(depth.progress)}`);
       await new Promise(r => setTimeout(r, 300));
     }
     if (depth.error) status("深度模型無法使用，只測紅綠燈與斑馬線（斑馬線需要深度確認平地，會一律不報）。");

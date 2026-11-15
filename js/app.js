@@ -56,8 +56,10 @@ function savePrefs() {
   $("logBtn").setAttribute("aria-pressed", String(!!prefs.fieldlog));
   document.body.classList.toggle("logging", !!prefs.fieldlog);
   const sum = fieldlog.summary();
+  const ttcText = Object.entries(sum.ttc).filter(([, v]) => v.n).map(([k, v]) => `「${k}」${v.n} 次平均剩 ${v.mean} 秒`).join("、");
   $("logSummary").textContent = sum.alerts || sum.misses
     ? `已記錄 ${sum.sessions} 場、約 ${sum.minutes} 分鐘：警報 ${sum.alerts} 句，標記誤報 ${sum.falseAlarms} 句（${sum.falseRate ?? 0}%），漏報 ${sum.misses} 次。`
+      + (ttcText ? `碰撞警報發出時：${ttcText}。` : "")
     : prefs.fieldlog ? "實測紀錄開啟：每句警報都會記在這支手機裡，偵測時可以按「標記誤報」「標記漏報」。" : "";
 }
 const fieldlog = new FieldLog();
@@ -463,8 +465,11 @@ async function processFrame(now, id) {
   cameraBlocked = update.cameraBlocked;
   // 「只有嗶聲」模式不念物體警報，光線不足等系統提醒（優先順序 0）照念；「停」攸關安全，一定要念
   // 「警報解除」也不念：這個模式根本沒念過警報
-  // 紅綠燈、斑馬線（科展版）：只在「語音＋嗶聲」模式念，優先順序比任何警報都低
-  const said = update.speech.concat(prefs.mode === "voice" ? detector.sceneSpeech.map(cue => [cue.text, C.SPEECH_PRIORITY.scene]) : []);
+  // 紅綠燈、斑馬線是輔助功能（研究主體是碰撞時間）：只在「語音＋嗶聲」模式念；
+  // 碰撞或靠近的警示音在響、這一幀有警報、或正在念警報時都不念，不能蓋過或延後「注意／危險／停」
+  const alarmBusy = update.beep || update.speech.some(([, pri]) => pri >= C.SPEECH_PRIORITY.speed) || audio.speakingPri > 0;
+  const sceneLines = prefs.mode === "voice" && !alarmBusy ? detector.sceneSpeech.map(cue => [cue.text, C.SPEECH_PRIORITY.scene]) : [];
+  const said = update.speech.concat(sceneLines);
   for (const [text, pri] of said) {
     if (prefs.mode !== "voice" && !((pri === 0 && text !== C.CLEAR_TEXT) || pri >= 4)) continue;
     audio.say(text, pri);

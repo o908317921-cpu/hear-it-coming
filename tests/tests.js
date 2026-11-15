@@ -1232,6 +1232,10 @@ test("行人號誌：小綠人上面有倒數數字才算，只有一團綠點�
   eq(pedestrianSignals(both, w, h).map(s => s.color), ["green"]);
   const alone = frame(); dots(alone, 140, 90, 180, 150, green);
   eq(pedestrianSignals(alone, w, h), []);
+  // 整條流程：隔幀掃描（PED_EVERY_N_FRAMES）時，小綠人一直在畫面裡仍會念「前方行人綠燈」，而且只念一次
+  const cues = new SceneCues(), said = [];
+  for (let i = 0; i < 10; i++) said.push(...cues.update({ signals: [], rgba: both, crosswalk: false, w, h, pathCenterX: w / 2, now: i * 0.1 }));
+  eq(said.map(s => s.text), [C.SIGNAL_TEXT.ped_green]);
 });
 test("高低差的語音", () => {
   const e = new AlertEngine();

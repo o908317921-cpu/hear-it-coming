@@ -320,6 +320,7 @@ export const C = {
   SIGNAL_MIN_LIT_SHARE: 0.008,    // 亮燈的顏色至少佔框的這個比例（而且要是第二多顏色的 2 倍）
   // 行人號誌（LED 小綠人／小紅人，YOLO 認不得，見 scene.js pedestrianSignals）
   PED_ENABLED: true,
+  PED_EVERY_N_FRAMES: 2,          // 每幾幀掃描一次（中間幀沿用上次結果）
   PED_TOP_RATIO: 1.0,             // 整個畫面都看（近看時號誌可能在畫面下半）
   PED_CELL: 4,                    // 每 4×4 像素算一格
   PED_GAP: 2,                     // LED 點之間的空隙：相隔 2 格以內算同一團

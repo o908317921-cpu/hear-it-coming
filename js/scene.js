@@ -315,6 +315,7 @@ export class SceneCues {
     this.light = { color: null, votes: [], said: null, saidAt: -Infinity, lastSeen: -Infinity };
     this.cross = { votes: [], on: false, saidAt: -Infinity };
     this.lights = [];             // 這一幀判讀過的燈（畫面用）
+    this.ped = { frame: 0, lights: [] };   // 行人號誌掃描每 PED_EVERY_N_FRAMES 幀做一次，中間幀沿用上次結果
   }
 
   // signals：[{box, score}]（traffic light）；crosswalk：要不要判斷斑馬線
@@ -331,7 +332,11 @@ export class SceneCues {
         this.lights.push({ box: s.box, color: trafficLightColor(rgba, w, s.box) });
       }
       // YOLO 認不得的台灣 LED 行人號誌（小綠人＋倒數）另外找
-      if (C.PED_ENABLED) this.lights.push(...pedestrianSignals(rgba, w, h).map(l => ({ ...l, ped: true })));
+      if (C.PED_ENABLED) {
+        // 燈號幾秒才變一次：隔幀掃描就夠，省下的時間留給碰撞偵測（手機上這段最花時間）
+        if (this.ped.frame++ % C.PED_EVERY_N_FRAMES === 0) this.ped.lights = pedestrianSignals(rgba, w, h).map(l => ({ ...l, ped: true }));
+        this.lights.push(...this.ped.lights);
+      }
     }
     const L = this.light;
     L.votes.push(pickLight(this.lights));

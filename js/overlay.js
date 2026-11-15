@@ -107,8 +107,19 @@ function drawStaticHazards(ctx, hazards) {
   }
 }
 
+// 紅綠燈（科展版）：框的顏色就是判讀出的燈號，分不出來時畫灰色
+const LIGHT_COLORS = { red: "#E53935", yellow: "#FFD400", green: "#3CC850" };
+const LIGHT_TEXT = { red: "紅燈", yellow: "黃燈", green: "綠燈" };
+function drawLights(ctx, lights) {
+  for (const { box: [x1, y1, x2, y2], color } of lights) {
+    const c = LIGHT_COLORS[color] || "#8C8C8C";
+    ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    chip(ctx, LIGHT_TEXT[color] || "號誌", x1, y1 > 26 ? y1 - 24 : y2 + 4, color ? c : null, color === "yellow" ? "#000" : "#fff", 14);
+  }
+}
+
 // frame：這次分析用的那一幀。畫面與框來自同一幀，手機轉動時框才不會跟畫面錯開
-export function drawOverlay(ctx, w, h, allTracks, { pathCenterX = null, staticHazards = [], frame = null } = {}) {
+export function drawOverlay(ctx, w, h, allTracks, { pathCenterX = null, staticHazards = [], lights = [], frame = null } = {}) {
   if (ctx.canvas.width !== w || ctx.canvas.height !== h) { ctx.canvas.width = w; ctx.canvas.height = h; }
   ctx.clearRect(0, 0, w, h);
   if (frame) ctx.drawImage(frame, 0, 0, w, h);
@@ -116,6 +127,7 @@ export function drawOverlay(ctx, w, h, allTracks, { pathCenterX = null, staticHa
   const tracks = allTracks.filter(tr => !tr.isPredicted);
   drawCollisionZone(ctx, w, h, pathCenterX);
   drawStaticHazards(ctx, staticHazards);
+  drawLights(ctx, lights);
 
   const focus = tracks.filter(isTrackOfInterest);
   // 純背景／靜止物體：只畫細灰框＋類別名稱，不搶視覺焦點

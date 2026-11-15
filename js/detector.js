@@ -3,12 +3,13 @@ import { C, classLabel } from "./config.js";
 import {
   classifyApproach, classifyGrowth, classifyProximity, collisionProbability, combinedRiskPct, computeIou,
   depthDistanceM, distanceEstimates, effectiveOccupancy, estimatePersonDistanceCm, findDepthHazards, median,
-  groundApproach, groundPoint, groundPointByHeight, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, predictCollision,
+  groundApproach, groundPoint, groundPointByHeight, groundPlaneDistanceM, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, predictCollision,
   regressionWindow, relativeVelocity, trajectoryOnCourse, truncationSides,
 } from "./analysis.js";
 import { maskElongation } from "./yolo.js";
 import { ByteTracker } from "./tracker.js";
 import { CameraMotionEstimator } from "./motion.js";
+import { SceneCues, findGroundSteps } from "./scene.js";
 
 // ============================================================
 // 影像小工具
@@ -118,6 +119,9 @@ export class HazardDetector {
     this.depthBoxes = new Map();      // 送去算深度的時間 → 當時物體的位置
     this.brightness = 255;
     this.lastDetectMs = 0;
+    this.signals = [];
+    this.scene = new SceneCues();
+    this.sceneSpeech = [];            // 這一幀要念的紅綠燈／斑馬線
   }
 
   // 用最近的追蹤速度推算物體目前位置：兩次 YOLO 之間，以及 YOLO 漏抓時暫留
@@ -154,7 +158,9 @@ export class HazardDetector {
     const globalBlur = laplacianVariance(gray, w, h, [0, 0, w, h], 2);
     const raw = await this.yolo.detect(canvas, w, h, { sharpen: globalBlur < C.GLOBAL_BLUR_SHARPEN_THRESHOLD });
     this.lastDetectMs = performance.now() - started;
-    const tracked = this.tracker.update(raw, now, this.cameraMotion);
+    // 紅綠燈不是會撞上的東西：不進追蹤與碰撞判斷，只交給 SceneCues 看顏色
+    this.signals = raw.filter(d => d.rawLabel === "traffic light" && d.score >= C.SIGNAL_MIN_CONF);
+    const tracked = this.tracker.update(raw.filter(d => d.rawLabel !== "traffic light"), now, this.cameraMotion);
 
     const detections = [];
     for (const { id: trackId, det } of tracked) {
@@ -206,7 +212,14 @@ export class HazardDetector {
     // 深度圖是幾百毫秒前的畫面算的，物體「當時」的位置也要挖掉
     for (const box of this.depthBoxes.get(this.lastDepthTs) || []) paintMask(exclude, dw, dh, sx, sy, null, box);
     for (const ts of [...this.depthBoxes.keys()]) if (this.lastDepthTs != null && ts < this.lastDepthTs) this.depthBoxes.delete(ts);
-    return findDepthHazards(disp, pathCenterX * sx, C.COLLISION_ZONE_RATIO, exclude).map(item => {
+    const found = findDepthHazards(disp, pathCenterX * sx, C.COLLISION_ZONE_RATIO, exclude);
+    // 地面高低差：前方已經有障礙物（牆、柱子）時不判斷，那時地面的直線本來就會斷掉
+    if (C.STEP_ENABLED && !found.some(item => item.kind === "obstacle")) {
+      const step = findGroundSteps(disp, pathCenterX * sx, exclude);
+      const distanceM = step ? groundPlaneDistanceM(step.row / sy, w, h) : Infinity;
+      if (step && distanceM <= C.STEP_ALERT_DISTANCE_M) found.push({ ...step, distanceM });
+    }
+    return found.map(item => {
       const box = [Math.round(item.box[0] / sx), Math.round(item.box[1] / sy),
                    Math.round(item.box[2] / sx), Math.round(item.box[3] / sy)];
       return { kind: item.kind, label: C.STATIC_TEXT[item.kind], box, distanceM: item.distanceM,
@@ -570,6 +583,11 @@ export class HazardDetector {
 
     this.trackedObjects = updated;
     this.updateStatic(current, now, pathCenterX, disp, depthFresh, w, h);
+    // 鏡頭被擋住時不判讀燈號與斑馬線
+    this.sceneSpeech = unseeing ? [] : this.scene.update({
+      signals: detectionFrame ? this.signals : [], rgba: frame.imageData.data,
+      gray: C.CROSSWALK_ENABLED ? gray : null, w, h, pathCenterX: pathCenterX ?? w / 2, now,
+    });
     return results;
   }
 }

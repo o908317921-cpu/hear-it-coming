@@ -124,11 +124,26 @@ export const C = {
   STATIC_MIN_AREA_RATIO: 0.04,
   STATIC_CONFIRM_COUNT: 2,
   STATIC_RELEASE_SEC: 1.0,
-  STATIC_TEXT: { overhead: "頭部高度障礙", obstacle: "前方障礙物" },
+  STATIC_TEXT: { overhead: "頭部高度障礙", obstacle: "前方障礙物", drop: "地面往下落差", step: "地面往上台階" },
   STATIC_ALERT_TEXT: {
     overhead: "{dir}，頭上有障礙",
     obstacle: "{dir}，有障礙物",
+    drop: "{dir}，地面往下有落差",
+    step: "{dir}，地面有台階",
   },
+
+  // ---------- 科展版：地面高低差（深度圖，見 js/scene.js）----------
+  // 只用合成深度圖驗證過，真實路緣、台階的門檻要實地測試後調整
+  STEP_ENABLED: true,
+  STEP_HORIZON_RATIO: 0.5,        // 地平線在畫面的哪個高度（手機直立固定在胸前）
+  STEP_REF_RATIO: 0.14,           // 最下面這麼多比例的地面當作「平地」基準
+  STEP_REF_MIN_R2: 0.8,           // 基準段要夠像一條直線，否則不判斷（地面本身就不平、被擋住）
+  STEP_SEARCH_TOP_RATIO: 0.62,    // 最遠只看到畫面這個高度：再上去離地平線太近，深度雜訊大，而且太遠
+  STEP_MIN_ROWS_RATIO: 0.03,      // 至少連續這麼多比例的列都偏離才算，不是一兩列雜訊
+  STEP_DROP_RATIO: 0.1,           // 比平地遠超過這個比例算往下的落差（15 公分路緣在 1.2 公尺高的鏡頭下約 11%）
+  STEP_RISE_RATIO: 0.1,           // 比平地近超過這個比例算往上的台階
+  STEP_RISE_MAX_RATIO: 1.6,       // 再更近就是牆或柱子，交給障礙物偵測
+  STEP_ALERT_DISTANCE_M: 8.0,     // 邊緣比這個遠不報
 
   // ---------- 相機自體運動補償（陀螺儀＋背景位移比對）----------
   CAMERA_MOTION_MODE: "auto",     // "auto" / "gyro" / "flow" / "none"
@@ -283,7 +298,32 @@ export const C = {
     near: [120, 200],
     close: [450, 30],
   },
-  SPEECH_PRIORITY: { info: 0, speed: 1, proximity: 2, static: 2, notice: 2.5, ttc: 3, urgent: 4 },
+  // ---------- 科展版：紅綠燈與斑馬線（見 js/scene.js）----------
+  // 只說看到什麼燈，不說「可以過」：分不出行人號誌和車輛號誌，也看不到來車有沒有停
+  SIGNAL_ENABLED: true,
+  SIGNAL_MIN_CONF: 0.35,
+  SIGNAL_MAX_OFFSET_RATIO: 0.35,  // 燈的中心離行走路徑中線超過畫面寬度的這個比例不算（旁邊路口的燈）
+  SIGNAL_MIN_HEIGHT_RATIO: 0.025, // 太小的燈顏色分不準
+  SIGNAL_MIN_VALUE: 0.55,         // 夠亮才算亮著的燈
+  SIGNAL_MIN_SAT: 0.4,
+  SIGNAL_MIN_LIT_SHARE: 0.04,     // 亮燈的顏色至少佔框的這個比例
+  SIGNAL_CONFIRM_WINDOW: 6,
+  SIGNAL_CONFIRM_HITS: 4,         // 最近 6 幀至少 4 幀同一個顏色才說
+  SIGNAL_REPEAT_SEC: 20.0,        // 同一個燈號隔這麼久才再提醒（燈號改變時馬上說）
+  SIGNAL_FORGET_SEC: 10.0,
+  SIGNAL_TEXT: { red: "前方紅燈", yellow: "前方黃燈", green: "前方綠燈" },
+  CROSSWALK_ENABLED: true,
+  CROSSWALK_TOP_RATIO: 0.55,      // 只看畫面下面這一段地面
+  CROSSWALK_WIDTH_RATIO: 0.5,
+  CROSSWALK_MIN_CONTRAST: 45,     // 亮條與暗條的灰階差
+  CROSSWALK_ROW_FILL: 0.75,       // 一列至少這麼多的點是亮的才算白漆（一小塊反光不算）
+  CROSSWALK_MIN_STRIPES: 3,
+  CROSSWALK_CONFIRM_WINDOW: 10,
+  CROSSWALK_CONFIRM_HITS: 6,
+  CROSSWALK_REPEAT_SEC: 30.0,
+  CROSSWALK_TEXT: "前方有斑馬線",
+
+  SPEECH_PRIORITY: { scene: 0.5, info: 0, speed: 1, proximity: 2, static: 2, notice: 2.5, ttc: 3, urgent: 4 },
 
   // ---------- 低幀率提醒 ----------
   MIN_SAFE_FPS: 3.0,
@@ -337,7 +377,8 @@ export const COCO_NAMES = ["person", "bicycle", "car", "motorcycle", "airplane",
 export function targetClassIds() {
   const ids = new Map();
   COCO_NAMES.forEach((name, id) => {
-    if (name in C.TARGET_CLASSES || name in C.ANIMAL_CLASSES || C.OBSTACLE_CLASSES.includes(name)) ids.set(id, name);
+    if (name in C.TARGET_CLASSES || name in C.ANIMAL_CLASSES || C.OBSTACLE_CLASSES.includes(name)
+        || (name === "traffic light" && C.SIGNAL_ENABLED)) ids.set(id, name);
   });
   return ids;
 }

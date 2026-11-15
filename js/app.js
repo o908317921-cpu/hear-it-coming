@@ -7,6 +7,7 @@ import { AudioOutput } from "./audio.js";
 import { DepthWorker } from "./depth.js";
 import { drawOverlay } from "./overlay.js";
 import { qrSvg } from "./qr.js";
+import { FieldLog } from "./fieldlog.js";
 // detector.js 與 yolo.js 會從 CDN 載入 ONNX Runtime，放到按下開始才載入：
 // 寫在最上面的話，沒有網路時整個程式都載不起來，大按鈕按了沒反應，也沒有語音能說明原因
 let HazardDetector = null, YoloSegmenter = null;
@@ -34,14 +35,15 @@ const GUIDE_STEPS = [
   "這是暫時沒有偵測的提示音，聽到它代表目前沒有保護。",
   () => { audio.lostTone(); return 900; },
   "按畫面下方的「目前狀況」，可以聽前方有什麼。",
-  "這個系統看不到地面的坑洞與高低差，請繼續使用導盲杖。",
+  "前方看到紅燈、綠燈或斑馬線時會說一聲，但不判斷能不能過馬路。",
+  "地面高低差只能提醒明顯的，坑洞看不到，請繼續使用導盲杖。",
 ];
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 // ---------- 使用者偏好：語速與提示方式，存在手機裡 ----------
 const RATES = [["慢", 0.9], ["正常", C.SPEECH_RATE], ["快", 1.4], ["很快", 1.8]];   // 習慣螢幕閱讀器的人常用很快的語速
 const MODES = { voice: "語音＋嗶聲", beep: "只有嗶聲" };   // 只有嗶聲：可分離演算法與語音提示的影響（報告研究限制二）
-const prefs = { rate: 1, mode: "voice" };
+const prefs = { rate: 1, mode: "voice", fieldlog: false };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem("blindnav-prefs") || "{}")); } catch (e) { /* 無痕模式 */ }
 if (!RATES[prefs.rate]) prefs.rate = 1;
 if (!MODES[prefs.mode]) prefs.mode = "voice";
@@ -50,7 +52,15 @@ function savePrefs() {
   audio.rate = RATES[prefs.rate][1];
   $("rateBtn").textContent = "語速：" + RATES[prefs.rate][0];
   $("modeBtn").textContent = "提示：" + MODES[prefs.mode];
+  $("logBtn").textContent = "實測紀錄：" + (prefs.fieldlog ? "開" : "關");
+  $("logBtn").setAttribute("aria-pressed", String(!!prefs.fieldlog));
+  document.body.classList.toggle("logging", !!prefs.fieldlog);
+  const sum = fieldlog.summary();
+  $("logSummary").textContent = sum.alerts || sum.misses
+    ? `已記錄 ${sum.sessions} 場、約 ${sum.minutes} 分鐘：警報 ${sum.alerts} 句，標記誤報 ${sum.falseAlarms} 句（${sum.falseRate ?? 0}%），漏報 ${sum.misses} 次。`
+    : prefs.fieldlog ? "實測紀錄開啟：每句警報都會記在這支手機裡，偵測時可以按「標記誤報」「標記漏報」。" : "";
 }
+const fieldlog = new FieldLog();
 let fpsCount = 0, fpsT = performance.now(), fps = 0;
 const shownWarnings = new Set();
 
@@ -409,7 +419,7 @@ function paintOverlay() {
   });
   // 靜態障礙不會自己動，只跟著手機轉動移動
   const staticHazards = s.staticHazards.map(hz => ({ ...hz, box: shiftBox(hz.box, cvx * dt, cvy * dt) }));
-  drawOverlay(octx, s.w, s.h, tracks, { pathCenterX: s.pathCenterX, staticHazards });
+  drawOverlay(octx, s.w, s.h, tracks, { pathCenterX: s.pathCenterX, staticHazards, lights: s.lights });
 }
 
 async function processFrame(now, id) {
@@ -452,8 +462,12 @@ async function processFrame(now, id) {
   cameraBlocked = update.cameraBlocked;
   // 「只有嗶聲」模式不念物體警報，光線不足等系統提醒（優先順序 0）照念；「停」攸關安全，一定要念
   // 「警報解除」也不念：這個模式根本沒念過警報
-  for (const [text, pri] of update.speech) {
-    if (prefs.mode === "voice" || (pri === 0 && text !== C.CLEAR_TEXT) || pri >= 4) audio.say(text, pri);
+  // 紅綠燈、斑馬線（科展版）：只在「語音＋嗶聲」模式念，優先順序比任何警報都低
+  const said = update.speech.concat(prefs.mode === "voice" ? detector.sceneSpeech.map(cue => [cue.text, C.SPEECH_PRIORITY.scene]) : []);
+  for (const [text, pri] of said) {
+    if (prefs.mode !== "voice" && !((pri === 0 && text !== C.CLEAR_TEXT) || pri >= 4)) continue;
+    audio.say(text, pri);
+    if (prefs.fieldlog && pri > 0) fieldlog.alert(text, alertKind(text, pri), alertTarget(tracks), fps);
   }
   for (const [text, dir] of update.alerts) {
     console.info("[警報]", text, dir ? C.DIRECTION_TEXT[dir] : "");
@@ -461,7 +475,7 @@ async function processFrame(now, id) {
   }
 
   // 畫面用鏡頭的即時影像（順）；框由 renderOverlay 在每次螢幕更新時推算到現在的位置。手機轉得太快時仍先不畫
-  overlayState = { w, h, tracks, staticHazards, capturedAt, pathCenterX: detector.cameraMotion.pathCenterX,
+  overlayState = { w, h, tracks, staticHazards, lights: detector.scene.lights, capturedAt, pathCenterX: detector.cameraMotion.pathCenterX,
     cameraV: [detector.cameraMotion.vx, detector.cameraMotion.vy] };
   paintOverlay();
   if (!overlayRaf) overlayRaf = requestAnimationFrame(renderOverlay);
@@ -647,6 +661,7 @@ $("startBtn").onclick = async () => {
     engine = new AlertEngine();
     lastTracks = []; lastHazards = []; hasFrame = false;
     running = true;
+    if (prefs.fieldlog) fieldlog.start({ text: `${yolo.backend} ${navigator.userAgent.slice(0, 80)}` });
     audio.start();
     requestWakeLock();
     setConn("wait", "載入中…");
@@ -676,7 +691,23 @@ $("startBtn").onclick = async () => {
   }
 };
 
+// 實測紀錄：這句警報屬於哪一種、針對哪個物體（碰撞時間最短的；沒有的話取最近的）
+function alertKind(text, pri) {
+  if (pri === C.SPEECH_PRIORITY.scene) return text === C.CROSSWALK_TEXT ? "斑馬線" : "紅綠燈";
+  const hazard = Object.entries(C.STATIC_ALERT_TEXT).find(([, t]) => text.endsWith(t.replace("{dir}，", "")));
+  if (hazard) return C.STATIC_TEXT[hazard[0]];
+  return { 4: "停", 3: "危險", 2.5: "注意", 2: "很近", 1: "很快／橫越" }[pri] ?? "其他";
+}
+function alertTarget(tracks) {
+  const seen = tracks.filter(tr => !tr.isPredicted);
+  const hits = seen.filter(tr => tr.inCollisionZone && Number.isFinite(tr.ttcSec));
+  if (hits.length) return hits.reduce((a, b) => (b.ttcSec < a.ttcSec ? b : a));
+  const near = seen.filter(tr => Number.isFinite(tr.distanceM));
+  return near.length ? near.reduce((a, b) => (b.distanceM < a.distanceM ? b : a)) : null;
+}
+
 function stopAll() {
+  if (running) fieldlog.stop();
   running = false;
   try { localStorage.removeItem("blindnav-loading"); } catch (e) { /* 無痕模式 */ }
   runId++;
@@ -751,6 +782,24 @@ $("rateBtn").onclick = () => {
   audio.stopSteps(); audio.hush();
   audio.say("語速" + RATES[prefs.rate][0], 1, true);
 };
+$("logBtn").onclick = () => {
+  prefs.fieldlog = !prefs.fieldlog;
+  savePrefs();
+  audio.stopSteps(); audio.hush();
+  audio.say("實測紀錄" + (prefs.fieldlog ? "開啟" : "關閉"), 1, true);
+};
+// 匯出成 CSV 給報告用；紀錄只在這支手機裡，不會自動送到任何地方
+$("exportBtn").onclick = () => {
+  const sum = fieldlog.summary();
+  if (!fieldlog.events.length) { audio.say("還沒有實測紀錄", 1, true); return; }
+  const url = URL.createObjectURL(new Blob([fieldlog.csv()], { type: "text/csv;charset=utf-8" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `hear-it-coming-實測紀錄-${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  audio.say(`已匯出 ${sum.alerts} 句警報的紀錄`, 1, true);
+};
+$("falseBtn").onclick = () => { audio.say(fieldlog.mark("false"), 1, true); savePrefs(); };
+$("missBtn").onclick = () => { audio.say(fieldlog.mark("miss"), 1, true); savePrefs(); };
 $("modeBtn").onclick = () => {
   prefs.mode = prefs.mode === "voice" ? "beep" : "voice";
   savePrefs();

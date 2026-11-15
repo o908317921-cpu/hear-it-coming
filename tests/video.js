@@ -10,7 +10,16 @@ import { toCsv, parseOverrides, frameTimes, ttcError, parseLabels, clipAlert, ev
 
 const $ = id => document.getElementById(id);
 const log = t => { $("log").textContent = t; };
-let trackRows = [], alertRows = [], summaryRows = [], stopRequested = false, baseName = "video";
+let trackRows = [], alertRows = [], summaryRows = [], stopRequested = false, baseName = "video", configName = "";
+
+// 實驗三（消融）：同一批影片依序跑這幾組設定，比較 F1（報告表 4-3）。
+// 影片沒有陀螺儀資料，「移除陀螺儀」離線跑會和完整版一樣，所以不列；那一列要用實測紀錄比較
+const ABLATIONS = [
+  ["完整 OL-TTC", {}],
+  ["ByteTrack → 框重疊率貪婪配對", { ABLATE_TRACKER: true }],
+  ["移除預測落點判斷", { ABLATE_LANDING: true }],
+  ["移除全域運動補償", { ABLATE_GMC: true }],
+];
 
 const video = document.createElement("video");
 video.muted = true; video.playsInline = true;
@@ -45,25 +54,60 @@ async function run() {
   }
   const fps = Number($("fps").value);
   if (!(fps > 0 && fps <= 120)) return log("每秒幀數要在 1 到 120 之間。");
-  // 要在載入模型之前改，MODEL_URL、INFERENCE_SIZE 才會生效；跑完要改回來，下一次分析才不會沿用上一次的設定。
-  // 沒有顯示晶片時會改用 CPU 那組設定（*_WASM）：一起改，換模型才不會在 CPU 上默默沒效果
+  const ablate = $("ablate").checked;
+  if (ablate && !labels) return log("消融比較要選標註檔（才算得出 F1）。");
+
+  $("run").disabled = true; $("stop").disabled = false;
+  for (const id of ["dlTracks", "dlAlerts", "dlSummary"]) $(id).disabled = true;
+  stopRequested = false; trackRows = []; alertRows = []; summaryRows = [];
+  baseName = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") : `${files.length}段影片`;
+  try {
+    if (!ablate) {
+      configName = "";
+      const res = await withSettings(over, () => analyzeAll(files, fps, over, labels));
+      summaryRows = res.rows;
+      log(res.lines.join("\n"));
+    } else {
+      const table = [], details = [];
+      for (const [name, extra] of ABLATIONS) {
+        if (stopRequested) break;
+        configName = name;
+        const merged = { ...over, ...extra };
+        const res = await withSettings(merged, () => analyzeAll(files, fps, merged, labels, `【${name}】`));
+        const ev = res.evaluation, base = table[0]?.F1;
+        table.push({ 設定: name, F1: ev?.f1 ?? "", 與完整版差異: table.length && ev?.f1 != null && base !== "" && base != null ? +(ev.f1 - base).toFixed(3) : "",
+                     精確率: ev?.precision ?? "", 召回率: ev?.recall ?? "", 誤報: ev?.fp ?? "", 漏報: ev?.fn ?? "" });
+        details.push(`【${name}】${res.lines.at(-1)}`);
+      }
+      configName = "";
+      summaryRows = table;
+      const diff = r => (r.與完整版差異 === "" ? "" : `（${r.與完整版差異 >= 0 ? "+" : ""}${r.與完整版差異}）`);
+      log([`實驗三（消融）：${files.length} 段影片 × ${table.length} 組設定`,
+           ...table.map(r => `${r.設定}：F1 ${r.F1 === "" ? "—" : r.F1}${diff(r)}`),
+           "（影片沒有陀螺儀資料，「移除陀螺儀補償」要用實測紀錄比較，這裡不列）", "", ...details].join("\n"));
+    }
+    for (const id of ["dlTracks", "dlAlerts", "dlSummary"]) $(id).disabled = false;
+  } finally {
+    configName = "";
+    $("run").disabled = false; $("stop").disabled = true;
+  }
+}
+
+// 暫時套用設定、跑完一定改回來（下一次分析才不會沿用上一次的設定）。
+// 要在載入模型之前改，MODEL_URL、INFERENCE_SIZE 才會生效；
+// 沒有顯示晶片時會改用 CPU 那組設定（*_WASM）：一起改，換模型才不會在 CPU 上默默沒效果
+async function withSettings(over, fn) {
   const applied = { ...over };
   if ("MODEL_URL" in over && !("MODEL_URL_WASM" in over)) applied.MODEL_URL_WASM = over.MODEL_URL;
   if ("INFERENCE_SIZE" in over && !("INFERENCE_SIZE_WASM" in over)) applied.INFERENCE_SIZE_WASM = over.INFERENCE_SIZE;
   const original = Object.fromEntries(Object.keys(applied).map(k => [k, C[k]]));
   Object.assign(C, applied);
-  $("run").disabled = true; $("stop").disabled = false;
-  for (const id of ["dlTracks", "dlAlerts", "dlSummary"]) $(id).disabled = true;
-  stopRequested = false; trackRows = []; alertRows = []; summaryRows = [];
-  baseName = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") : `${files.length}段影片`;
-  try { await analyzeAll(files, fps, over, labels); } finally {
-    Object.assign(C, original);
-    $("run").disabled = false; $("stop").disabled = true;
-  }
+  try { return await fn(); } finally { Object.assign(C, original); }
 }
 
-async function analyzeAll(files, fps, over, labels) {
-  log("載入辨識模型…");
+// 一組設定跑完所有影片；回傳要顯示的文字、實驗二的評分（有標註時）與結果摘要的列
+async function analyzeAll(files, fps, over, labels, tag = "") {
+  log(`${tag}載入辨識模型…`);
   let yolo;
   try { yolo = await YoloSegmenter.load(); } catch (e) {
     throw new Error(`辨識模型載入失敗：${e.message || e}。輸入大小可能和模型不符（yolo11n-det-320 只能用 320；448 請配 yolo11n-seg.onnx）`);
@@ -82,34 +126,35 @@ async function analyzeAll(files, fps, over, labels) {
   try {
     for (const [n, file] of files.entries()) {
       if (stopRequested) break;
-      const rows = await analyzeOne(file, fps, yolo, depth, `第 ${n + 1}／${files.length} 段`);
+      const rows = await analyzeOne(file, fps, yolo, depth, `${tag}第 ${n + 1}／${files.length} 段`);
       clips.push({ file: file.name, ...clipAlert(rows.alerts) });
     }
   } finally { depth?.close?.(); }
 
-  const lines = [`${stopRequested ? "已停止" : "完成"}：${clips.length} 段影片，${trackRows.length} 筆物體紀錄、${alertRows.filter(r => r.kind === "speech").length} 句警報。`];
+  const mineTracks = trackRows.filter(r => (r.config ?? "") === configName);
+  const lines = [`${stopRequested ? "已停止" : "完成"}：${clips.length} 段影片，${mineTracks.length} 筆物體紀錄。`];
   lines.push(engine + (depth ? "，含深度模型" : ""));
   if (Object.keys(over).length) lines.push(`設定覆寫：${JSON.stringify(over)}`);
   // 實驗一：只有一段影片時，填了真實碰撞時刻就算 TTC 誤差
   const tc = Number($("tc").value);
   if (files.length === 1 && $("tc").value !== "" && tc > 0) {
-    const err = ttcError(trackRows, tc);
+    const err = ttcError(mineTracks, tc);
     if (err) lines.push(err.n ? `實驗一：物體 ${err.id} 在真實 TTC ≤ 3 秒的 ${err.n} 幀，TTC 平均絕對誤差 ${err.mae} 秒`
                               : `實驗一：物體 ${err.id} 沒有落在真實 TTC ≤ 3 秒的幀（確認碰撞時刻）`);
   }
   // 實驗二：有標註檔時算精確率、召回率、F1、提前時間、方向正確率
+  let evaluation = null, rows;
   if (labels) {
     const r = evaluateClips(clips, labels);
-    summaryRows = r.rows;
+    evaluation = r; rows = r.rows;
+    if (r.unlabeled.length) lines.push(`沒有標註、不計分：${r.unlabeled.join("、")}`);
     lines.push(`實驗二：正確警示 ${r.tp}、誤報 ${r.fp}、漏報 ${r.fn}、正確安靜 ${r.tn}｜精確率 ${r.precision ?? "—"}、召回率 ${r.recall ?? "—"}、F1 ${r.f1 ?? "—"}`
       + `｜方向正確率 ${r.dirAccuracy ?? "—"}｜平均提前 ${r.leadMean ?? "—"} 秒`
       + `（各級：${Object.entries(r.leadByTier).map(([k, v]) => `${k} ${v.mean ?? "—"} 秒／${v.n} 段`).join("、")}）`);
-    if (r.unlabeled.length) lines.push(`沒有標註、不計分：${r.unlabeled.join("、")}`);
   } else {
-    summaryRows = clips.map(c => ({ 檔名: c.file, 系統警示: c.alerted ? 1 : 0, 第一句秒: c.firstT ?? "", 系統方向: c.dir ?? "", 碰撞警報句數: c.count }));
+    rows = clips.map(c => ({ 檔名: c.file, 系統警示: c.alerted ? 1 : 0, 第一句秒: c.firstT ?? "", 系統方向: c.dir ?? "", 碰撞警報句數: c.count }));
   }
-  log(lines.join("\n"));
-  for (const id of ["dlTracks", "dlAlerts", "dlSummary"]) $(id).disabled = false;
+  return { lines, evaluation, rows };
 }
 
 // 一段影片：逐幀跑偵測與警報規則；每段影片重新開始追蹤與警報狀態，彼此不影響
@@ -143,7 +188,7 @@ async function analyzeOne(file, fps, yolo, depth, label) {
       // 深度模型在背景執行緒算：離線分析時等它算完，結果才不會受電腦快慢影響
       if (depth) { const w0 = performance.now(); while (depth.busy && performance.now() - w0 < 5000) await new Promise(r => setTimeout(r, 10)); }
       const update = engine.update(tracks, t, false, { brightness: detector.brightness, frameWidth: grab.width, staticHazards: detector.staticHazards });
-      const at = { file: file.name, frame: i, t: +t.toFixed(3) };
+      const at = { ...(configName ? { config: configName } : {}), file: file.name, frame: i, t: +t.toFixed(3) };
       for (const tr of tracks) {
         trackRows.push({
           ...at, id: tr.trackId, label: tr.rawLabel, predicted: tr.isPredicted ? 1 : 0,
@@ -178,4 +223,4 @@ $("stop").onclick = () => { stopRequested = true; };
 $("dlTracks").onclick = () => download(`${baseName}_每幀物體.csv`, toCsv(trackRows));
 $("dlAlerts").onclick = () => download(`${baseName}_警報.csv`, toCsv(alertRows));
 $("dlSummary").onclick = () => download(`${baseName}_結果摘要.csv`, toCsv(summaryRows));
-log("選影片後按「開始分析」。可以一次選多段；實驗二再選標註檔。");
+log("選影片後按「開始分析」。可以一次選多段；實驗二、三再選標註檔。");

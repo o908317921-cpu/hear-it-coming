@@ -27,6 +27,7 @@ canvas{max-width:100%;margin-top:12px;border:1px solid #2B3035}
 <input type="number" id="fps" value="30" min="1" max="120">
 <label for="tc">真實碰撞時刻（秒，實驗一用，只選一段影片時有效，可留空）：側拍算出物體到達鏡頭的時間，填了會算 TTC 平均絕對誤差（只算真實 TTC ≤ 3 秒的幀）</label>
 <input type="number" id="tc" step="0.01" min="0">
+<label><input type="checkbox" id="ablate"> 消融比較（實驗三）：同一批影片依序跑「完整、ByteTrack 換成貪婪配對、移除預測落點、移除全域運動補償」四組設定，列出 F1 比較表（要選標註檔；時間是一般分析的 4 倍）</label>
 <label><input type="checkbox" id="depth"> 同時跑深度模型（頭上障礙、地面高低差、斑馬線；較慢）</label>
 <label for="over">設定覆寫（JSON，可留空）。例：消融 <code>{"ABLATE_TRACKER":true}</code>、<code>{"ABLATE_LANDING":true}</code>、<code>{"ABLATE_GMC":true}</code>、移除陀螺儀 <code>{"CAMERA_MOTION_MODE":"flow"}</code>；實驗六 <code>{"DETECTION_INTERVAL":3}</code>、分割模型 448 <code>{"MODEL_URL":"../models/yolo11n-seg.onnx","INFERENCE_SIZE":448}</code>（目前的偵測模型只能用 320）</label>
 <textarea id="over" spellcheck="false"></textarea>

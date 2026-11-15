@@ -4,6 +4,8 @@ import { BEEP_LEVELS, beepLevel, beepPattern, speedLevelText, ttcIsMeaningful } 
 
 // 速度的文字描述，例如「跑步」「快速（橫越）」
 export function speedDescription(tr) {
+  // 椅子這類不會自己動的東西：畫面裡變快是因為使用者在走，說它「速度快」會像它朝人衝過來
+  if (C.OBSTACLE_CLASSES.includes(tr.rawLabel) && tr.speedLevel !== "slow") return "你正在靠近";
   const text = speedLevelText(tr.label, tr.speedLevel);
   if (tr.speedSource === "lateral" && tr.speedLevel !== "slow") return `${text}（橫越）`;
   return text;
@@ -385,10 +387,12 @@ export function sceneSummary(tracks, staticHazards = [], limit = C.SCENE_MAX_ITE
 // 面板要顯示的摘要：最快物體、最高碰撞風險、最近的行人
 export function frameSummary(tracks) {
   if (!tracks.length) return { fastest: null, highest: null, person: null };
-  const fastest = maxBy(tracks, tr => tr.speedPctS);
+  // 「最快的物體」只算會自己動的；椅子等障礙物變快是使用者在走
+  const movers = tracks.filter(tr => !C.OBSTACLE_CLASSES.includes(tr.rawLabel));
+  const fastest = movers.length ? maxBy(movers, tr => tr.speedPctS) : null;
   const highest = maxBy(tracks, tr => tr.collisionProbability);
   return {
-    fastest: { label: fastest.label, pct: fastest.speedPctS, level: fastest.speedLevel,
+    fastest: fastest && { label: fastest.label, pct: fastest.speedPctS, level: fastest.speedLevel,
                text: speedDescription(fastest) },
     highest: { label: highest.label, probability: highest.collisionProbability,
                ttc: ttcIsMeaningful(highest.ttcSec) ? highest.ttcSec : null,

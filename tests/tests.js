@@ -2,7 +2,7 @@
 // 開啟 tests/index.html 即可執行；加上 ?model=1 會再用真實模型跑公車照片的整合測試。
 import { C, applyUserSettings, classLabel, targetClassIds, COCO_NAMES } from "../js/config.js";
 import * as A from "../js/analysis.js";
-import { AlertEngine, alertLevelOf, sceneSummary } from "../js/alerts.js";
+import { AlertEngine, alertLevelOf, sceneSummary, speedDescription, frameSummary } from "../js/alerts.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
 import { ByteTracker } from "../js/tracker.js";
@@ -1187,6 +1187,14 @@ test("紅綠燈顏色：綠色燈殼和樹葉不算綠燈，亮的青綠色 LED 
   eq(trafficLightColor(fill([50, 115, 85]), w, [0, 0, w, h]), null);     // 台灣燈殼的綠漆：暗（亮度約 0.45）
   eq(trafficLightColor(fill([150, 210, 40]), w, [0, 0, w, h]), null);    // 樹葉：黃綠色（色相約 80°）
   eq(trafficLightColor(fill([40, 230, 190]), w, [0, 0, w, h]), "green"); // 亮的青綠色 LED
+});
+test("椅子等障礙物不說速度快，也不算最快的物體", () => {
+  const chair = { rawLabel: "chair", label: "障礙物", speedLevel: "fast", speedPctS: 90, collisionProbability: 10, ttcSec: Infinity };
+  eq(speedDescription(chair), "你正在靠近");
+  eq(speedDescription({ ...chair, speedLevel: "slow" }) === "你正在靠近", false);
+  eq(frameSummary([chair]).fastest, null);
+  const bike = { ...chair, rawLabel: "bicycle", label: "腳踏車", speedPctS: 40 };
+  eq(frameSummary([chair, bike]).fastest.label, "腳踏車");
 });
 test("行人號誌：小綠人上面有倒數數字才算，只有一團綠點不算", () => {
   const w = 320, h = 240;

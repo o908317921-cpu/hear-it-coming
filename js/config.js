@@ -311,6 +311,19 @@ export const C = {
   SIGNAL_MIN_VALUE: 0.35,         // 夠亮才算亮著的燈
   SIGNAL_MIN_SAT: 0.35,
   SIGNAL_MIN_LIT_SHARE: 0.008,    // 亮燈的顏色至少佔框的這個比例（而且要是第二多顏色的 2 倍）
+  // 行人號誌（LED 小綠人／小紅人，YOLO 認不得，見 scene.js pedestrianSignals）
+  PED_ENABLED: true,
+  PED_TOP_RATIO: 1.0,             // 整個畫面都看（近看時號誌可能在畫面下半）
+  PED_CELL: 4,                    // 每 4×4 像素算一格
+  PED_GAP: 2,                     // LED 點之間的空隙：相隔 2 格以內算同一團
+  PED_MIN_VALUE: 0.45,            // LED 很亮
+  PED_MIN_SAT: 0.35,              // 而且很鮮豔
+  PED_MIN_CELLS: 8,
+  PED_MIN_ASPECT: 0.9,            // 小人比寬還高（倒數數字兩位數比較寬，下限 0.4）
+  PED_MAX_ASPECT: 3.0,
+  PED_MIN_FILL: 0.02,             // LED 是一顆顆的點：亮的像素只佔框的一小部分（整塊亮的是招牌）
+  PED_MAX_FILL: 0.35,
+  PED_MAX_DARK: 0.5,              // 點和點之間是黑色面板
   SIGNAL_CONFIRM_WINDOW: 6,
   SIGNAL_CONFIRM_HITS: 4,         // 最近 6 幀至少 4 幀同一個顏色才說
   SIGNAL_REPEAT_SEC: 20.0,        // 同一個燈號隔這麼久才再提醒（燈號改變時馬上說）

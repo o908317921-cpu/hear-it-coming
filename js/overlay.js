@@ -148,8 +148,11 @@ export function drawOverlay(ctx, w, h, allTracks, { pathCenterX = null, staticHa
     // 移動方向箭頭；有 TTC 時另外畫出外推的碰撞落點
     const foot = [Math.trunc((x1 + x2) / 2), Math.trunc(y2)];
     const hasTtc = ttcIsMeaningful(tr.ttcSec);
-    const end = motionArrowEndpoint(foot[0], foot[1], tr.relativeVx, tr.relativeVy, hasTtc ? tr.predictedPoint : foot);
-    if (end[0] !== foot[0] || end[1] !== foot[1]) arrow(ctx, foot, end, ARROW, 3);
+    // 椅子這類不會自己動的東西不畫箭頭：它在畫面裡「靠近」是因為使用者在走，畫箭頭會像椅子朝人衝過來
+    if (!C.OBSTACLE_CLASSES.includes(tr.rawLabel)) {
+      const end = motionArrowEndpoint(foot[0], foot[1], tr.relativeVx, tr.relativeVy, hasTtc ? tr.predictedPoint : foot);
+      if (end[0] !== foot[0] || end[1] !== foot[1]) arrow(ctx, foot, end, ARROW, 3);
+    }
     if (hasTtc) {
       const [px, py] = tr.predictedPoint;
       const hit = tr.inCollisionZone ? C.LEVEL_COLORS.RED : MUTED;

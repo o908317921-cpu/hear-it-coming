@@ -124,6 +124,73 @@ export function trafficLightColor(rgba, frameWidth, box) {
   return best;
 }
 
+// 行人號誌（小綠人）：YOLO 的 traffic light 是用車用燈訓練的，台灣的 LED 行人號誌它幾乎認不得。
+// 只靠顏色會把車尾燈、招牌、樹葉都當成燈（真實照片 216 張裡 79 張誤報），所以只認台灣號誌的樣子：
+// 黑色面板上一團青綠色 LED 小人，正上方緊貼著一團橘色 LED 倒數數字。小紅人沒有倒數可以對照，不判斷。
+// 回傳 [{box, color, debug}]；debug 給測試頁看為什麼算或不算
+export function pedestrianSignals(rgba, w, h, debug = null) {
+  const cell = C.PED_CELL, gw = Math.floor(w / cell), gh = Math.floor(h * C.PED_TOP_RATIO / cell);
+  const kind = new Uint8Array(gw * gh);           // 0 沒有、1 綠、2 橘（倒數數字）
+  const lit = new Uint16Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let g = 0, r = 0;   // r：橘
+      for (let y = gy * cell; y < (gy + 1) * cell; y++) {
+        for (let x = gx * cell; x < (gx + 1) * cell; x++) {
+          const i = (y * w + x) * 4;
+          const [hue, s, v] = hsv(rgba[i], rgba[i + 1], rgba[i + 2]);
+          if (v < C.PED_MIN_VALUE || s < C.PED_MIN_SAT) continue;
+          if (hue >= 130 && hue < 200) g++;      // 台灣的小綠人偏青色
+          else if (hue >= 20 && hue < 45) r++;    // 倒數數字是橘色
+        }
+      }
+      const k = gy * gw + gx;
+      if (g >= 2 && g > r) { kind[k] = 1; lit[k] = g; } else if (r >= 2) { kind[k] = 2; lit[k] = r; }
+    }
+  }
+  // LED 點之間有空隙：相隔 GAP 格以內的同色格子算同一團
+  const seen = new Uint8Array(gw * gh), out = [], gap = C.PED_GAP;
+  for (let start = 0; start < kind.length; start++) {
+    if (!kind[start] || seen[start]) continue;
+    const color = kind[start], stack = [start];
+    let x1 = Infinity, y1 = Infinity, x2 = -1, y2 = -1, cells = 0, px = 0;
+    seen[start] = 1;
+    while (stack.length) {
+      const k = stack.pop(), cx = k % gw, cy = (k - cx) / gw;
+      cells++; px += lit[k];
+      x1 = Math.min(x1, cx); x2 = Math.max(x2, cx); y1 = Math.min(y1, cy); y2 = Math.max(y2, cy);
+      for (let dy = -gap; dy <= gap; dy++) for (let dx = -gap; dx <= gap; dx++) {
+        const nx = cx + dx, ny = cy + dy, n = ny * gw + nx;
+        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh || seen[n] || kind[n] !== color) continue;
+        seen[n] = 1; stack.push(n);
+      }
+    }
+    if (cells < C.PED_MIN_CELLS) continue;
+    const box = [x1 * cell, y1 * cell, (x2 + 1) * cell, (y2 + 1) * cell];
+    const bw = box[2] - box[0], bh = box[3] - box[1];
+    // 面板要黑：框裡不亮的像素平均亮度要低（招牌、樹葉、車尾燈旁邊都是亮的或有顏色的）
+    let darkSum = 0, darkN = 0;
+    for (let y = box[1]; y < box[3]; y++) for (let x = box[0]; x < box[2]; x++) {
+      const i = (y * w + x) * 4, [, s, v] = hsv(rgba[i], rgba[i + 1], rgba[i + 2]);
+      if (v < C.PED_MIN_VALUE || s < C.PED_MIN_SAT) { darkSum += v; darkN++; }
+    }
+    const info = { color: color === 1 ? "green" : "orange", box, cells, aspect: +(bh / bw).toFixed(2),
+      fill: +(px / (bw * bh)).toFixed(3), dark: +(darkN ? darkSum / darkN : 1).toFixed(2) };
+    const ok = bh >= h * C.SIGNAL_MIN_HEIGHT_RATIO && info.aspect >= (color === 1 ? C.PED_MIN_ASPECT : 0.4) && info.aspect <= C.PED_MAX_ASPECT
+      && info.fill >= C.PED_MIN_FILL && info.fill <= C.PED_MAX_FILL && info.dark <= C.PED_MAX_DARK;
+    debug?.push({ ...info, ok });
+    if (ok) out.push(info);
+  }
+  // 小綠人正上方要有倒數數字：左右重疊大半、寬度差不多、上下幾乎貼著
+  const digits = out.filter(b => b.color === "orange");
+  return out.filter(m => m.color === "green" && digits.some(d => {
+    const [mx1, my1, mx2] = m.box, [dx1, , dx2, dy2] = d.box, mw = mx2 - mx1;
+    const overlap = Math.min(mx2, dx2) - Math.max(mx1, dx1);
+    return overlap >= 0.5 * mw && (dx2 - dx1) <= 2 * mw && (dx2 - dx1) >= 0.5 * mw
+      && dy2 <= my1 + 0.1 * (m.box[3] - my1) && my1 - dy2 <= 0.6 * (m.box[3] - my1);
+  })).map(m => ({ box: m.box, color: "green" }));
+}
+
 // 好幾個燈裡要說哪一個：判讀得出顏色的燈都同一個顏色才說；一紅一綠（不同方向的號誌同時入鏡）就不說，
 // 說錯燈號比不說更危險。lights：[{box, color}]；回傳顏色或 null
 export function pickLight(lights) {
@@ -230,6 +297,8 @@ export class SceneCues {
         if (s.box[3] - s.box[1] < h * C.SIGNAL_MIN_HEIGHT_RATIO) continue;
         this.lights.push({ box: s.box, color: trafficLightColor(rgba, w, s.box) });
       }
+      // YOLO 認不得的台灣 LED 行人號誌（小綠人＋倒數）另外找
+      if (C.PED_ENABLED) this.lights.push(...pedestrianSignals(rgba, w, h));
     }
     const L = this.light;
     L.votes.push(pickLight(this.lights));

@@ -8,7 +8,7 @@ import { CameraMotionEstimator } from "../js/motion.js";
 import { ByteTracker } from "../js/tracker.js";
 import { keepLargestComponent, maskElongation } from "../js/yolo.js";
 import { downloadWithRetry } from "../js/ort.js";
-import { findGroundSteps, trafficLightColor, crosswalkStripes, SceneCues, pickLight } from "../js/scene.js";
+import { findGroundSteps, trafficLightColor, crosswalkStripes, SceneCues, pickLight, pedestrianSignals } from "../js/scene.js";
 import { FieldLog } from "../js/fieldlog.js";
 
 const tests = [];
@@ -1174,6 +1174,18 @@ test("紅綠燈：好幾個燈同一個顏色才說，一紅一綠就不說", ()
   eq(pickLight([{ color: "green" }, { color: "red" }]), null);
   eq(pickLight([{ color: null }]), null);
   eq(pickLight([]), null);
+});
+test("行人號誌：小綠人上面有倒數數字才算，只有一團綠點不算", () => {
+  const w = 320, h = 240;
+  const frame = () => { const d = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < d.length; i += 4) { d[i] = d[i + 1] = d[i + 2] = 40; d[i + 3] = 255; } return d; };
+  // LED 點：每 6 像素一顆 3×3 的亮點
+  const dots = (d, x1, y1, x2, y2, rgb) => { for (let y = y1; y < y2; y += 6) for (let x = x1; x < x2; x += 6)
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) d.set(rgb, ((y + dy) * w + x + dx) * 4); };
+  const green = [40, 230, 190], orange = [250, 150, 30];
+  const both = frame(); dots(both, 140, 40, 180, 80, orange); dots(both, 140, 90, 180, 150, green);
+  eq(pedestrianSignals(both, w, h).map(s => s.color), ["green"]);
+  const alone = frame(); dots(alone, 140, 90, 180, 150, green);
+  eq(pedestrianSignals(alone, w, h), []);
 });
 test("高低差的語音", () => {
   const e = new AlertEngine();

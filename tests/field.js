@@ -133,7 +133,7 @@ export async function run() {
     log(`深度模型第 ${attempt + 1} 次：${depth.ready ? "就緒 " + depth.backend : depth.error || "逾時"}（下載 ${Math.round(depth.progress * 100)}%）`);
   }
   if (depth.error) throw new Error("深度模型無法使用：" + depth.error);
-  const results = [];
+  const results = [], depthFailed = [];
   const tally = {};
   const count = (key, verdict) => { tally[key] = tally[key] || {}; tally[key][verdict] = (tally[key][verdict] || 0) + 1; };
   let ts = 1;
@@ -159,11 +159,17 @@ export async function run() {
 
     if (SET.lightOnly || new URLSearchParams(location.search).has("lightonly")) { results.push(r); continue; }   // ?lightonly：只測紅綠燈
     // ---- 地面高低差（鏡頭傾斜的照片，App 不判斷）
-    let level = false, flat = false;
+    let level = false, flat = false, disp = null;
+    if (!TILTED.has(name)) {
+      // 顯示晶片忙的時候深度偶爾逾時：再試一次，還是不行就這張的地面與斑馬線不計分，不讓整組測試中斷
+      for (let k = 0; k < 2 && !disp; k++) {
+        try { disp = await depthOf(depth, canvas, w, h, ts++); } catch (e) { console.warn(name, e.message); }
+      }
+      if (!disp) { depthFailed.push(name); results.push({ ...r, ground: "深度失敗，不計分" }); continue; }
+    }
     if (TILTED.has(name)) {
       r.ground = "鏡頭傾斜，不判斷";
     } else {
-      const disp = await depthOf(depth, canvas, w, h, ts++);
       const sx = disp.width / w, sy = disp.height / h, exclude = new Uint8Array(disp.width * disp.height);
       for (const d of raw.filter(d => d.score >= 0.4 && d.rawLabel !== "traffic light")) {
         for (let y = Math.floor(d.box[1] * sy); y < Math.min(disp.height, d.box[3] * sy); y++)
@@ -193,6 +199,7 @@ export async function run() {
       `白色橫條 ${stripes}${!flat && stripes >= C.CROSSWALK_MIN_STRIPES ? "（深度圖沒有確認是平地，不判斷）" : ""}`);
     results.push(r);
   }
+  if (depthFailed.length) log(`深度模型逾時、地面與斑馬線不計分：${depthFailed.join("、")}`);
   for (const [k, t] of Object.entries(tally)) {
     log(`${k}：說對 ${t["對"] || 0}、正確安靜 ${t["對（安靜）"] || 0}、漏報 ${t["漏報"] || 0}、誤報 ${t["誤報"] || 0}`);
   }

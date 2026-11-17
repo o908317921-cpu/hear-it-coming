@@ -68,6 +68,7 @@ export function lateralToSpeedPct(rate) {
   ]);
 }
 
+// 只給畫面顯示用（風險百分比、進度條）；要不要警報、念什麼一律看 alerts.js 的 alertLevelOf
 // 碰撞風險 = TTC 預測、距離、速度三者取最大值；並保證橙色 ≥ 35%、紅色 ≥ 60%
 // 軌跡不會進入行走路徑（onCourse=false）時，距離與速度只算一部分，也不保底
 export function combinedRiskPct(ttcProbability, occupancyRatio, proximityLevel, speedPctS, speedLevel,
@@ -133,7 +134,8 @@ export function ttcIsMeaningful(ttcSec) {
 
 // 「迫近」(looming) 碰撞時間公式 TTC = h / (dh/dt)；dh/dt 太小視為不會碰撞
 export function computeTtc(height, dhDt) {
-  if (dhDt < C.MIN_DH_DT_FOR_TTC) return Infinity;
+  if (C.TTC_FLOOR_NORMALIZED ? dhDt < C.TTC_FLOOR_ABS_MIN || dhDt < C.TTC_FLOOR_REL * height
+    : dhDt < C.MIN_DH_DT_FOR_TTC) return Infinity;
   return Math.max(0, Math.min(height / dhDt, C.TTC_MAX_CLAMP_SEC));
 }
 
@@ -380,7 +382,7 @@ export function fuseDistance(estimates) {
   return valid.reduce((s, [d, w]) => s + d * w, 0) / total;
 }
 
-// 回傳 [融合距離, 是否被遮擋, 截斷的邊]
+// 回傳 [融合距離, 是否被遮擋, 截斷的邊, 兩個獨立來源是否一致（可以念出公尺數）]
 export function distanceEstimates(rawLabel, box, occupancyRatio, maskFill, frameWidth, frameHeight,
                                   depthM = Infinity, scale = 1.0) {
   const sides = truncationSides(box, frameWidth, frameHeight);
@@ -388,6 +390,9 @@ export function distanceEstimates(rawLabel, box, occupancyRatio, maskFill, frame
   const ratioW = C.FUSION_WEIGHT_RATIO * (occluded || sides.size ? C.FUSION_UNRELIABLE_WEIGHT : 1);
   // 上下被切掉時框高不是真正的高度；物體已經很近，而深度圖近處飽和會讀得太遠
   const cutVertically = sides.has("top") || sides.has("bottom");
+  const pinholeM = cutVertically || occluded ? Infinity : pinholeDistanceM(rawLabel, box[3] - box[1], frameWidth, frameHeight);
+  const agrees = Number.isFinite(pinholeM) && Number.isFinite(depthM) && depthM > 0
+    && Math.max(pinholeM, depthM) / Math.min(pinholeM, depthM) <= C.DISTANCE_AGREE_RATIO;
   let fused = fuseDistance([
     [ratioDistanceM(occupancyRatio, scale), ratioW],
     [pinholeDistanceM(rawLabel, box[3] - box[1], frameWidth, frameHeight), cutVertically ? 0 : C.FUSION_WEIGHT_PINHOLE],
@@ -395,7 +400,7 @@ export function distanceEstimates(rawLabel, box, occupancyRatio, maskFill, frame
   ]);
   // 腳已出畫面：一定比畫面最下緣看到的地面還近
   if (sides.has("bottom")) fused = Math.min(fused, groundDistanceM(frameWidth, frameHeight));
-  return [fused, occluded, sides];
+  return [fused, occluded, sides, agrees];
 }
 
 // 距離分級用的面積比例；遮擋或截斷時改用融合距離反推的比例（取較大者）

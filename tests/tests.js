@@ -22,7 +22,7 @@ function track(o = {}) {
   return { trackId: 1, label: "行人", rawLabel: "person", box: [280, 100, 360, 400], state: "GREEN",
     occupancyRatio: 0.05, horizontalPosition: "center", speedPctS: 0, speedSource: "approach", speedLevel: "slow",
     ttcSec: Infinity, inCollisionZone: false, collisionProbability: 0, proximityLevel: "GREEN",
-    distanceM: Infinity, ...o };
+    distanceM: Infinity, distanceAgrees: true, ...o };
 }
 const texts = u => u.speech.map(s => s[0]);
 const hazard = (distanceM = 1.4, kind = "overhead") => ({ kind, label: C.STATIC_TEXT[kind], box: [260, 40, 380, 160],
@@ -68,6 +68,16 @@ test("碰撞風險跟著顏色", () => {
 test("TTC 公式", () => {
   eq(A.computeTtc(200, 100), 2);
   eq(A.computeTtc(200, 0), Infinity);
+});
+test("相對 TTC 門檻（實驗開關）：遠處小框快速靠近也算得出來，關掉時維持原樣", () => {
+  // 40 px 高、每秒長 10 px：TTC 4 秒，但低於固定的 15 px/s
+  eq(A.computeTtc(40, 10), Infinity);
+  C.TTC_FLOOR_NORMALIZED = true;
+  try {
+    eq(A.computeTtc(40, 10), 4);
+    eq(A.computeTtc(400, 20), Infinity);   // 大框每秒只長 5%：TTC 20 秒，不算
+    eq(A.computeTtc(10, 2), Infinity);     // 低於絕對下限：當成抖動
+  } finally { C.TTC_FLOOR_NORMALIZED = false; }
 });
 test("線性回歸斜率", () => {
   close(A.linearSlope([0, 1, 2, 3], [1, 3, 5, 7]), 2);
@@ -580,6 +590,23 @@ test("目前狀況：最危險的先念、長度有限", () => {
   assert(text.startsWith("偵測到 6 個物體。") && text.split("行人").length - 1 === C.SCENE_MAX_ITEMS);
   assert(text.endsWith(`另外還有 ${6 - C.SCENE_MAX_ITEMS} 個。`), text);
 });
+test("目前狀況：排序跟語音同一套分級，風險百分比只是顯示", () => {
+  // 風險百分比很高、但沒有要撞上的（例如很大的框）排在真正會撞上的後面
+  const big = track({ trackId: 1, distanceM: 3, collisionProbability: 95 });
+  const hit = track({ trackId: 2, label: "腳踏車", rawLabel: "bicycle", distanceM: 6, collisionProbability: 40, ttcSec: 1.5, inCollisionZone: true });
+  assert(sceneSummary([big, hit]).startsWith("偵測到 2 個物體。正前方腳踏車"), sceneSummary([big, hit]));
+  eq(frameSummary([big, hit]).highest.label, "腳踏車");
+});
+test("說出口的距離：框高與深度圖不一致時不念公尺數", () => {
+  eq(sceneSummary([track({ distanceM: 4.2, distanceAgrees: false })]), "偵測到 1 個物體。正前方行人。");
+  // 4 公尺左右的行人：框高與深度圖一致才可以念
+  const h = A.focalPx(640, 480) * C.CLASS_REAL_HEIGHT_CM.person / 100 / 4;
+  const box = [300, 240 - h / 2, 300 + h / 3, 240 + h / 2];
+  eq(A.distanceEstimates("person", box, 0.02, 0.6, 640, 480, 4.3)[3], true);
+  eq(A.distanceEstimates("person", box, 0.02, 0.6, 640, 480, 8)[3], false);      // 深度圖說 8 公尺：差太多
+  eq(A.distanceEstimates("person", box, 0.02, 0.6, 640, 480)[3], false);         // 沒有深度圖：只有一個來源
+  eq(A.distanceEstimates("person", [280, 200, 360, 478], 0.01, 0.6, 640, 480, 1)[3], false); // 腳出畫面：框高不可信
+});
 
 // ---------- test_humane_voice.py：不嘮叨、不命令、不把系統的問題推給使用者，真正危險時又一定要出聲 ----------
 function runFrames(engine, makeItems, seconds, { fps = 10, start = 0, ...opts } = {}) {
@@ -825,9 +852,23 @@ test("TTC 短暫中斷時「會撞上」也跟著暫留", async () => {
     const [tr] = await det.process(scene, (i + 1) / 10);
     if (tr && Number.isFinite(tr.ttcSec) && tr.ttcSec < C.TTC_MAX_CLAMP_SEC) states.push(tr.inCollisionZone);
   }
-  // 一開始要連續幾次都判定會撞上才算（ZONE_CONFIRM_HITS）；算數之後就不能再一閃一閃
+  // 一開始要連續一段時間（ZONE_CONFIRM_SEC，每秒 10 幀約 3 次）都判定會撞上才算；算數之後就不能再一閃一閃
   const from = states.indexOf(true);
-  assert(from >= 0 && from <= C.ZONE_CONFIRM_HITS && states.slice(from).every(Boolean), JSON.stringify(states));
+  assert(from >= 0 && from <= Math.round(C.ZONE_CONFIRM_SEC * 10) + 1 && states.slice(from).every(Boolean), JSON.stringify(states));
+});
+test("確認時間以秒計：每秒 4 幀時不會比每秒 10 幀晚很多才喊", async () => {
+  // 同一個等速靠近的物體，分別用每秒 10 幀與 4 幀跑，記下第一次「在路徑上」的時間
+  const firstZone = async fps => {
+    const det = new HazardDetector(new FakeYolo(n => 1190 / (6 - (0.15 * 10 / fps) * n)), null);
+    for (let i = 0; i < 12 * fps / 10 + 30; i++) {
+      const [tr] = await det.process(scene, (i + 1) / fps);
+      if (tr?.inCollisionZone) return (i + 1) / fps;
+    }
+    return Infinity;
+  };
+  const t10 = await firstZone(10), t4 = await firstZone(4);
+  assert(Number.isFinite(t10) && Number.isFinite(t4), `${t10} ${t4}`);
+  assert(t4 - t10 <= 0.5, `每秒 4 幀晚了 ${(t4 - t10).toFixed(2)} 秒（10 幀：${t10}、4 幀：${t4}）`);
 });
 test("遠離的物體不在路徑上，靜止擋路的在", async () => {
   assert(!(await runDetector(45, 30, n => 300 - n * 4)).results.at(-1)[0].onCourse);

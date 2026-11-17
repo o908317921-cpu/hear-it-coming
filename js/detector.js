@@ -499,15 +499,19 @@ export class HazardDetector {
         ttcSource = prev.ttcSource;
         if (groundHold) [ttc, predictedPoint] = [heldTtc, [pathCenterX, h - 1]];
       }
-      // 單一幀的抖動不能喊「危險」：要連續幾次都判定會撞上才算；快撞上了就少等一點，腳已經出畫面（就在面前）完全不等
-      const zoneHits = Number.isFinite(heldTtc) && heldTtc <= C.TTC_DANGER_SEC && inCollisionZone
-        ? (prev ? prev.zoneHits : 0) + (isPredicted ? 0 : 1) : 0;
+      // 單一幀的抖動不能喊「危險」：要連續一段時間都判定會撞上才算；快撞上了就少等一點，腳已經出畫面（就在面前）完全不等。
+      // 用「秒」不用「幾幀」：CPU 手機每秒約 4 幀，數幀數的話同樣設定要多等 3 倍（議會結論）。每秒 10 幀時與原本完全相同
+      const zoneOn = Number.isFinite(heldTtc) && heldTtc <= C.TTC_DANGER_SEC && inCollisionZone;
+      const zoneHits = zoneOn ? (prev ? prev.zoneHits : 0) + (isPredicted ? 0 : 1) : 0;
+      const zoneSince = zoneOn ? (prev?.zoneSince ?? (isPredicted ? null : now)) : null;
       const trackedLongEnough = win.length > 1 && win[win.length - 1][0] - win[0][0]
         >= (height >= C.ZONE_NEAR_HEIGHT_RATIO * h ? C.ZONE_MIN_SPAN_NEAR_SEC : C.ZONE_MIN_SPAN_SEC);
+      const far = height < C.ZONE_FAR_HEIGHT_RATIO * h;
+      const needSec = far ? C.ZONE_CONFIRM_SEC_FAR : heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_SEC : C.ZONE_CONFIRM_SEC_URGENT;
+      const zoneLongEnough = !far && heldTtc <= C.TTC_URGENT_SEC && sidesForTtc.has("bottom") ? zoneHits >= 1
+        : zoneHits >= C.ZONE_CONFIRM_MIN_HITS && zoneSince != null && now - zoneSince >= needSec - 1e-6;
       const zoneConfirmed = inCollisionZone && (trackedLongEnough || (prev && prev.zoneConfirmed))
-        && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneHits >= (height < C.ZONE_FAR_HEIGHT_RATIO * h ? C.ZONE_CONFIRM_HITS_FAR
-            : heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_HITS : sidesForTtc.has("bottom") ? 1 : C.ZONE_CONFIRM_HITS_URGENT)
-            || (prev && prev.zoneConfirmed && zoneHits > 0));
+        && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneLongEnough || (prev && prev.zoneConfirmed && zoneHits > 0));
       const [relativeVx, relativeVy] = relativeVelocity(vx, vy);
       let probability = collisionProbability({
         ttc, predictedX: predictedPoint[0], objectWidth: x2 - x1, frameWidth: w,
@@ -533,7 +537,7 @@ export class HazardDetector {
       } else if (prev && now - depthTime <= C.DEPTH_MAX_AGE_SEC) {
         depthM = prev.depthM;
       }
-      const [fusedM, occluded, truncated] = distanceEstimates(det.rawLabel, det.box, occupancyRatio, det.maskQuality,
+      const [fusedM, occluded, truncated, distanceAgrees] = distanceEstimates(det.rawLabel, det.box, occupancyRatio, det.maskQuality,
         w, h, depthM, proximityScale);
       const levelRatio = effectiveOccupancy(occupancyRatio, fusedM, occluded, truncated, proximityScale);
       const ttcWarningSec = C.TTC_DANGER_SEC * C.TTC_WARNING_MULTIPLIER;
@@ -577,7 +581,7 @@ export class HazardDetector {
         trajHistory, distanceSpeedCmS, mask: displayMask, vx, vy, blurScore: det.blurScore,
         isBlurry: det.isBlurry, elongation: det.elongation, maskQuality: det.maskQuality,
         ttcSec: heldTtc, ttcHoldCount: holdCount, ttcTime: now, ttcMeasuredAt, proximityLevel, speedLevel, depthM, depthTime,
-        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneConfirmed, groundCourse, jumpCount, firstSeen: prev ? prev.firstSeen : now,
+        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneSince, zoneConfirmed, groundCourse, jumpCount, firstSeen: prev ? prev.firstSeen : now,
       });
 
       results.push({
@@ -587,7 +591,7 @@ export class HazardDetector {
         speedPctS, speedSource, speedLevel, ttcSec: heldTtc, predictedPoint, inCollisionZone: zoneConfirmed, onCourse,
         collisionProbability: probability, predictedOffsetPx: predictedPoint[0] - pathCenterX,
         vx, vy, relativeVx, relativeVy, distanceCm: fusedM * 100, distanceSpeedCmS, approachState, proximityLevel,
-        isPredicted, ageSec: now - (prev ? prev.firstSeen : now), distanceM: fusedM, occluded, truncated: [...truncated].sort(),
+        isPredicted, ageSec: now - (prev ? prev.firstSeen : now), distanceM: fusedM, distanceAgrees, occluded, truncated: [...truncated].sort(),
         ttcSource, groundVector: ground && { x: ground.x, z: ground.z, vx: ground.vx, vz: ground.vz, missM: ground.missM },
       });
     }

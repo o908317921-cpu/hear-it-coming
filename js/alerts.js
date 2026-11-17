@@ -31,7 +31,7 @@ export function nearestPersonInfo(tracks) {
 
 // 「值得注意」的物體：行人、狀態非安全、正在移動，或有 TTC 量測
 export function isTrackOfInterest(tr) {
-  return tr.rawLabel === "person" || tr.state !== "GREEN" || tr.proximityLevel !== "GREEN"
+  return tr.rawLabel === "person" || alertLevelOf(tr) !== "SAFE" || tr.proximityLevel !== "GREEN"
     || tr.speedLevel !== "slow" || tr.speedPctS > C.ATTENTION_GROWTH_PCT_S || ttcIsMeaningful(tr.ttcSec);
 }
 
@@ -368,16 +368,20 @@ export function spokenDistance(distanceM) {
   return distanceM < 1 ? "不到 1 公尺" : `約 ${Math.round(distanceM)} 公尺`;
 }
 
-// 使用者主動詢問「目前狀況」時念的一句話：靜態障礙優先，其餘依碰撞風險排序
+const LEVEL_RANK = { STOP: 3, DANGER: 2, NOTICE: 1, SAFE: 0 };
+
+// 使用者主動詢問「目前狀況」時念的一句話：靜態障礙優先，其餘依警示等級（跟語音同一套）、再依距離排序。
+// 公尺數只在框高與深度圖兩個來源一致時才念，不一致就只說方向和物體
+
 export function sceneSummary(tracks, staticHazards = [], limit = C.SCENE_MAX_ITEMS) {
   const join = items => items.filter(Boolean).join("，");
   const parts = [...staticHazards].sort((a, b) => a.distanceM - b.distanceM)
     .map(h => join([`${C.DIRECTION_TEXT[h.horizontalPosition]}${h.label}`, spokenDistance(h.distanceM)]));
-  const ranked = [...tracks].sort((a, b) => (b.collisionProbability - a.collisionProbability) || (a.distanceM - b.distanceM));
+  const ranked = [...tracks].sort((a, b) => (LEVEL_RANK[alertLevelOf(b)] - LEVEL_RANK[alertLevelOf(a)]) || (a.distanceM - b.distanceM));
   for (const tr of ranked) {
     const hit = Number.isFinite(tr.ttcSec) && tr.ttcSec <= C.TTC_DANGER_SEC && tr.inCollisionZone;
     const motion = hit ? "可能撞上" : (tr.approachState === "approaching" ? "正在靠近" : "");
-    parts.push(join([`${C.DIRECTION_TEXT[tr.horizontalPosition]}${tr.label}`, spokenDistance(tr.distanceM), motion]));
+    parts.push(join([`${C.DIRECTION_TEXT[tr.horizontalPosition]}${tr.label}`, tr.distanceAgrees ? spokenDistance(tr.distanceM) : "", motion]));
   }
   if (!parts.length) return C.SCENE_EMPTY_TEXT;
   const more = parts.length > limit ? `另外還有 ${parts.length - limit} 個。` : "";
@@ -390,7 +394,7 @@ export function frameSummary(tracks) {
   // 「最快的物體」只算會自己動的；椅子等障礙物變快是使用者在走
   const movers = tracks.filter(tr => !C.OBSTACLE_CLASSES.includes(tr.rawLabel));
   const fastest = movers.length ? maxBy(movers, tr => tr.speedPctS) : null;
-  const highest = maxBy(tracks, tr => tr.collisionProbability);
+  const highest = maxBy(tracks, tr => LEVEL_RANK[alertLevelOf(tr)] * 1000 + tr.collisionProbability);
   return {
     fastest: fastest && { label: fastest.label, pct: fastest.speedPctS, level: fastest.speedLevel,
                text: speedDescription(fastest) },

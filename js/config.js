@@ -102,6 +102,8 @@ export const C = {
   TRUNCATED_BOTTOM_MIN_ORANGE: true,
   FUSION_WEIGHT_RATIO: 1.0,
   FUSION_WEIGHT_PINHOLE: 1.0,
+  // 語音只在兩個獨立來源（框高針孔公式、深度圖）相差不到這個倍數時才念「約幾公尺」，否則不念數字
+  DISTANCE_AGREE_RATIO: 1.3,
   FUSION_WEIGHT_DEPTH: 0.4,       // 深度圖換算的公尺數近處偏遠，只當參考
  
   FUSION_UNRELIABLE_WEIGHT: 0.2,
@@ -225,17 +227,25 @@ export const C = {
   // 錯身而過：預測「最接近時離使用者多遠」，推得愈遠愈不準，對方也還來得及自己閃開。
   // 還有 TTC_DANGER_SEC 秒才到時要落在 HIT_RADIUS_FAR_M 內才算會撞上，剩 TTC_URGENT_SEC 秒時放寬到 GROUND_HIT_RADIUS_M
   HIT_RADIUS_FAR_M: 0.4,
-  ZONE_CONFIRM_HITS: 3,           // 連續這麼多次偵測都判定會撞上才喊「危險」（每秒 10 幀時約晚 0.2 秒）
-  ZONE_CONFIRM_HITS_URGENT: 2,    // 已經在「停」的範圍內：只多等一次
+  // 連續判定會撞上至少這麼久才喊「危險」，且至少 ZONE_CONFIRM_MIN_HITS 次真的偵測（單一幀不算）。
+  // 以秒計：原本數幀數（3／2／5 幀），每秒 4 幀的手機要等 3 倍久；每秒 10 幀時兩種寫法結果相同
+  ZONE_CONFIRM_SEC: 0.2,
+  ZONE_CONFIRM_SEC_URGENT: 0.1,   // 已經在「停」的範圍內：只多等一下
+  ZONE_CONFIRM_MIN_HITS: 2,
   // 遠處的小框：框高差兩三個像素，算出來的 TTC 就差一倍，要連續更多次才算（機車在 20 公尺外不會因為雜訊就喊「停」）
   ZONE_FAR_HEIGHT_RATIO: 0.2,     // 框高不到畫面高度的這個比例算小框
-  ZONE_CONFIRM_HITS_FAR: 5,
+  ZONE_CONFIRM_SEC_FAR: 0.4,
   ZONE_MIN_SPAN_SEC: 0.6,         // 剛看到的物體只有兩三個樣本，算出來的 TTC 是雜訊：至少追蹤這麼久才喊
   ZONE_MIN_SPAN_NEAR_SEC: 0.3,    // 已經很近的大框（突然從轉角出現的人）等不起，雜訊相對也小：只等這麼久
   ZONE_NEAR_HEIGHT_RATIO: 0.4,    // 框高超過畫面高度的這個比例算「很近」
   HIT_RADIUS_BODY_M: 0.3,         // 半徑裡已經算進去的半個身寬；比這個寬的物體（汽車）再往外加
   HIT_RELEASE_SCALE: 1.3,         // 已經判定會撞上之後，落點要超出半徑的這個倍數才解除，判定才不會在邊緣一閃一閃
   MIN_DH_DT_FOR_TTC: 15.0,
+  // 實驗開關（預設關）：固定 15 px/s 會讓「很遠但很快」的小框（TTC ≤ h/15）永遠算不出 TTC。
+  // 開啟後改用相對門檻：(dh/dt)/h ≥ TTC_FLOOR_REL（即 TTC ≤ 1/TTC_FLOOR_REL 秒），再加一個很小的絕對下限擋抖動
+  TTC_FLOOR_NORMALIZED: false,
+  TTC_FLOOR_REL: 0.125,
+  TTC_FLOOR_ABS_MIN: 3.0,
   RECEDING_MIN_RATE: 0.15,        // 框高每秒縮小超過這個比例才算遠離；用比例，近處的大框才不會因為抖動被當成遠離
   ATTENTION_GROWTH_PCT_S: 8.0,
 

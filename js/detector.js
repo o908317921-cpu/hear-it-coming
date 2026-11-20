@@ -4,7 +4,7 @@ import {
   classifyApproach, classifyGrowth, classifyProximity, collisionProbability, combinedRiskPct, computeIou,
   depthDistanceM, distanceEstimates, effectiveOccupancy, estimatePersonDistanceCm, findDepthHazards, median,
   groundApproach, groundPoint, groundPointByHeight, groundPlaneDistanceM, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, predictCollision,
-  regressionWindow, relativeVelocity, trajectoryOnCourse, truncationSides,
+  regressionWindow, relativeVelocity, scaleInvariantLanding, trajectoryOnCourse, truncationSides,
 } from "./analysis.js";
 import { maskElongation } from "./yolo.js";
 import { ByteTracker } from "./tracker.js";
@@ -419,7 +419,7 @@ export class HazardDetector {
         // 這段時間框總共才長大幾個像素：跟框本身的抖動分不出來，不算在靠近。
         // 剛看到的物體只有三四個樣本時最容易這樣，遠處的機車會因此被喊「停」
         const grownPx = dhDt * (ts[ts.length - 1] - ts[0]);
-        if (dhDt > 0 && grownPx < Math.max(C.LOOMING_MIN_GROWTH_PX, C.LOOMING_MIN_GROWTH_RATIO * height)) dhDt = 0;
+        if (!C.TTC_LOWER_BOUND && dhDt > 0 && grownPx < Math.max(C.LOOMING_MIN_GROWTH_PX, C.LOOMING_MIN_GROWTH_RATIO * height)) dhDt = 0;
         const rawDistanceSpeed = -linearSlope(ts, hs.map(estimatePersonDistanceCm));
         distanceSpeedCmS = (1 - C.DISTANCE_SMOOTH_ALPHA) * prev.distanceSpeedCmS + C.DISTANCE_SMOOTH_ALPHA * rawDistanceSpeed;
         approachState = classifyApproach(distanceSpeedCmS);
@@ -461,7 +461,7 @@ export class HazardDetector {
         groundHits = courseHit ? prev.groundHits + (isPredicted ? 0 : 1) : 0;
         groundSince = courseHit ? (prev.groundSince ?? now) : null;
         // 框高那邊已經判定會撞上、而且更早到，就照原來的；否則以腳底向量為準
-        if (courseHit && groundHits >= C.GROUND_CONFIRM_HITS
+        if (!C.GROUND_VETO_ONLY && courseHit && groundHits >= C.GROUND_CONFIRM_HITS
             && (prev.ttcSource === "ground" || now - groundSince >= C.GROUND_CONFIRM_SEC)
             && !(inCollisionZone && ttc <= ground.ttc)) {
           const reach = w * C.COLLISION_ZONE_RATIO / 2 + Math.max(1, (x2 - x1) / 2);
@@ -471,6 +471,10 @@ export class HazardDetector {
           ttcSource = "ground";
         }
       }
+      // 議會二：與尺度無關的落點取代畫面像素外推（實驗開關 LANDING_SCALE_INVARIANT）
+      const siLanding = C.LANDING_SCALE_INVARIANT && prev && !occludedByFront
+        ? scaleInvariantLanding(win, motion.offsetX - pathCenterX, det.rawLabel, ttc, prev.siHit) : null;
+      if (siLanding && ttcSource !== "ground") inCollisionZone = siLanding.hit;
       // 實驗三（消融）ABLATE_LANDING：不看預測落點，只要在靠近（TTC 有限）就算在路徑上
       if (C.ABLATE_LANDING) inCollisionZone = Number.isFinite(ttc);
       const prevTtc = prev ? prev.ttcSec : Infinity;
@@ -508,7 +512,9 @@ export class HazardDetector {
         >= (height >= C.ZONE_NEAR_HEIGHT_RATIO * h ? C.ZONE_MIN_SPAN_NEAR_SEC : C.ZONE_MIN_SPAN_SEC);
       const far = height < C.ZONE_FAR_HEIGHT_RATIO * h;
       const needSec = far ? C.ZONE_CONFIRM_SEC_FAR : heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_SEC : C.ZONE_CONFIRM_SEC_URGENT;
-      const zoneLongEnough = !far && heldTtc <= C.TTC_URGENT_SEC && sidesForTtc.has("bottom") ? zoneHits >= 1
+      // 議會二：腳出畫面只代表「很近」，不代表「會撞上」：開了與尺度無關的落點時，要它也判定會撞上才能不等
+      const zoneLongEnough = C.ZONE_CONFIRM_OFF || !far && heldTtc <= C.TTC_URGENT_SEC && sidesForTtc.has("bottom")
+        && (!C.LANDING_SCALE_INVARIANT || !!siLanding?.hit) ? zoneHits >= 1
         : zoneHits >= C.ZONE_CONFIRM_MIN_HITS && zoneSince != null && now - zoneSince >= needSec - 1e-6;
       const zoneConfirmed = inCollisionZone && (trackedLongEnough || (prev && prev.zoneConfirmed))
         && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneLongEnough || (prev && prev.zoneConfirmed && zoneHits > 0));
@@ -581,7 +587,7 @@ export class HazardDetector {
         trajHistory, distanceSpeedCmS, mask: displayMask, vx, vy, blurScore: det.blurScore,
         isBlurry: det.isBlurry, elongation: det.elongation, maskQuality: det.maskQuality,
         ttcSec: heldTtc, ttcHoldCount: holdCount, ttcTime: now, ttcMeasuredAt, proximityLevel, speedLevel, depthM, depthTime,
-        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneSince, zoneConfirmed, groundCourse, jumpCount, firstSeen: prev ? prev.firstSeen : now,
+        inCollisionZone, maskRejects, groundHits, groundSince, ttcSource, zoneHits, zoneSince, zoneConfirmed, groundCourse, jumpCount, siHit: siLanding ? siLanding.hit : (prev?.siHit ?? false), firstSeen: prev ? prev.firstSeen : now,
       });
 
       results.push({

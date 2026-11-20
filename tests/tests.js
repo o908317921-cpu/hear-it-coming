@@ -65,6 +65,11 @@ test("碰撞風險跟著顏色", () => {
   assert(A.combinedRiskPct(0, 0.01, "GREEN", 0, "fast") >= C.PROBABILITY_RED_PCT);
   eq(A.combinedRiskPct(0, 0.9, "RED", 0, "slow"), 100);
 });
+test("τ⁻¹ 信賴下界：比中位數保守，沒有雜訊時兩者相同", () => {
+  const ts = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], clean = ts.map(t => 100 / (1 - t / 3)), noisy = clean.map((h, i) => h + (i % 2 ? 3 : -3));
+  close(A.loomingRate(ts, clean, 1.645), A.loomingRate(ts, clean), 1e-6);
+  assert(A.loomingRate(ts, noisy, 1.645) < A.loomingRate(ts, noisy) && A.loomingRate(ts, noisy, 1.645) > 0);
+});
 test("TTC 公式", () => {
   eq(A.computeTtc(200, 100), 2);
   eq(A.computeTtc(200, 0), Infinity);
@@ -925,12 +930,20 @@ test("腳底向量：落地點換算到地面、速度向量指向使用者就�
 test("腳底向量：斜向走來的人方位不變，畫面外推會漏掉，腳底向量抓得到", async () => {
   // 從右前方 2 m、前方 6 m 朝使用者直直走來，4 秒後撞上：在畫面上的左右位置完全不動
   const toward = t => [2 * (1 - t / 4), 6 * (1 - t / 4)];
-  const enabled = C.GROUND_VECTOR_ENABLED;
+  const [enabled, scaleInvariant] = [C.GROUND_VECTOR_ENABLED, C.LANDING_SCALE_INVARIANT];
   C.GROUND_VECTOR_ENABLED = false;
-  let old;
-  try { old = await walk(toward, 3.5); } finally { C.GROUND_VECTOR_ENABLED = enabled; }
+  let old, ratioOnly;
+  try {
+    C.LANDING_SCALE_INVARIANT = false;
+    old = await walk(toward, 3.5);
+    C.LANDING_SCALE_INVARIANT = true;
+    ratioOnly = await walk(toward, 3.5);
+  } finally { [C.GROUND_VECTOR_ENABLED, C.LANDING_SCALE_INVARIANT] = [enabled, scaleInvariant]; }
   const oldFirst = old.findIndex(anyDanger);
-  assert(oldFirst < 0 || 4 - oldFirst / 10 < 1.5, `（對照）只靠畫面外推時，要到剩不到 1.5 秒才發現，實際第 ${oldFirst} 幀`);
+  assert(oldFirst < 0 || 4 - oldFirst / 10 < 1.5, `（對照）只靠畫面像素外推時，要到剩不到 1.5 秒才發現，實際第 ${oldFirst} 幀`);
+  // 議會二：x/h（= 橫向距離 ÷ 身高）外推到撞上那一刻接近 0，不用腳底向量也能及早發現
+  const ratioFirst = ratioOnly.findIndex(anyDanger);
+  assert(ratioFirst >= 0 && 4 - ratioFirst / 10 >= 1.5, `x/h 落點要在撞上前 1.5 秒以上發現，實際第 ${ratioFirst} 幀`);
   const frames = await walk(toward, 3.5);
   const first = frames.findIndex(anyDanger);
   assert(first >= 0, "腳底向量要判定會撞上");

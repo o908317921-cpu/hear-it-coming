@@ -246,6 +246,19 @@ export const C = {
   TTC_FLOOR_NORMALIZED: false,
   TTC_FLOOR_REL: 0.125,
   TTC_FLOOR_ABS_MIN: 3.0,
+  // 實驗開關（預設關，議會「minimal-core」）：TTC 改用 1/h 擬合斜率的單邊信賴下界（Sen 法），
+  // 只有「連最樂觀的估計都說會在 N 秒內撞上」才算；取代 15 px/s 門檻與「長大幾像素」檢查
+  TTC_LOWER_BOUND: false,
+  TTC_LB_Z: 1.645,                // 單邊 95%
+  // 實驗開關（預設關）：腳底向量只用來取消「錯身而過」的警報，不再自己產生 TTC
+  GROUND_VETO_ONLY: false,
+  // 實驗開關（預設關）：拿掉「連續判定一段時間才喊」的確認等待
+  ZONE_CONFIRM_OFF: false,
+  // 議會二（模擬：斜向切入 2→10/12、前方橫越誤報 3→0/12、沒調過的右側 20° 斜向 8→11/12）：
+  // 落點改用「橫向位置 ÷ 框高」= 物體實際橫向距離 ÷ 物體實際高度，與距離、手機俯仰無關。
+  // 會撞上的人方位固定、框越來越大，這個比值外推到撞上那一刻會接近 0；錯身 0.9 m 的人一直停在 0.9 ÷ 1.7 ≈ 0.53。
+  // 算不出來（框被側邊切、上下都切）時退回原本的畫面像素外推。設成 false 就是舊版
+  LANDING_SCALE_INVARIANT: true,
   RECEDING_MIN_RATE: 0.15,        // 框高每秒縮小超過這個比例才算遠離；用比例，近處的大框才不會因為抖動被當成遠離
   ATTENTION_GROWTH_PCT_S: 8.0,
 

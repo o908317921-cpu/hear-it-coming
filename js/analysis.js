@@ -134,6 +134,8 @@ export function ttcIsMeaningful(ttcSec) {
 
 // 「迫近」(looming) 碰撞時間公式 TTC = h / (dh/dt)；dh/dt 太小視為不會碰撞
 export function computeTtc(height, dhDt) {
+  // 信賴下界模式：dh/dt 已經是保守估計，雜訊大時自然接近 0，不需要另外的門檻
+  if (C.TTC_LOWER_BOUND) return dhDt > 0 ? Math.max(0, Math.min(height / dhDt, C.TTC_MAX_CLAMP_SEC)) : Infinity;
   if (C.TTC_FLOOR_NORMALIZED ? dhDt < C.TTC_FLOOR_ABS_MIN || dhDt < C.TTC_FLOOR_REL * height
     : dhDt < C.MIN_DH_DT_FOR_TTC) return Infinity;
   return Math.max(0, Math.min(height / dhDt, C.TTC_MAX_CLAMP_SEC));
@@ -189,13 +191,21 @@ export function predictCollision({ footX, footY, objectWidth, frameWidth, frameH
 // 所以改對 1/s 回歸：TTC = (1/s) ÷ (−斜率)，沒有這個偏差。
 // 用 Theil–Sen（所有兩兩斜率的中位數）而不是最小平方：人多時框常常有一兩幀跳掉
 // （兩個人被框成一個、被前面的人擋住只框到一半），最小平方會被那一幀拉出很大的「靠近速度」，中位數不會。
-export function loomingRate(times, sizes) {
+// z > 0：改回傳 τ⁻¹ 的單邊信賴下界。Sen (1968) 斜率信賴區間：成對斜率排序後取第 (N + z·√(n(n−1)(2n+5)/18)) / 2 個；
+// 1/h 的斜率靠近時是負的，取偏大（較不負）的那一側就是「最不危險」的估計
+export function loomingRate(times, sizes, z = 0) {
   const inverse = sizes.map(s => 1 / Math.max(s, 1)), n = times.length, slopes = [];
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) if (times[j] > times[i]) slopes.push((inverse[j] - inverse[i]) / (times[j] - times[i]));
   }
   if (!slopes.length) return 0;
-  const slope = median(slopes), last = times[n - 1];
+  let slope = median(slopes);
+  if (z > 0) {
+    slopes.sort((a, b) => a - b);
+    const half = z * Math.sqrt(n * (n - 1) * (2 * n + 5) / 18);
+    slope = slopes[Math.min(slopes.length - 1, Math.ceil((slopes.length + half) / 2) - 1)];
+  }
+  const last = times[n - 1];
   const fittedNow = median(inverse.map((v, i) => v + slope * (last - times[i])));
   return fittedNow > 0 ? -slope / fittedNow : 0;
 }
@@ -217,17 +227,43 @@ export function loomingDhDt(win, height, sides, reachesPath = false, frameHeight
       if (win.length < C.TRAJECTORY_MIN_FRAMES) return 0;
     }
   }
-  const ts = win.map(p => p[0]);
-  let rate = loomingRate(ts, win.map(p => p[3]));
-  const widthRate = !left && !right ? loomingRate(ts, win.map(p => p[4])) : null;
+  const ts = win.map(p => p[0]), z = C.TTC_LOWER_BOUND ? C.TTC_LB_Z : 0;
+  let rate = loomingRate(ts, win.map(p => p[3]), z);
+  const widthRate = !left && !right ? loomingRate(ts, win.map(p => p[4]), z) : null;
   if (sides.has("top") || sides.has("bottom")) {
     const tops = win.map(p => p[5]);
-    if (!sides.has("top") && Math.min(...tops) >= C.TOP_SCALE_MIN_PX) rate = loomingRate(ts, tops);
+    if (!sides.has("top") && Math.min(...tops) >= C.TOP_SCALE_MIN_PX) rate = loomingRate(ts, tops, z);
     else rate = widthRate ?? 0;
   } else if (rate > 0 && widthRate != null && widthRate < rate * C.LOOMING_MIN_WIDTH_SHARE) {
     rate = 0;
   }
   return rate * height;
+}
+
+// 與尺度無關的落點（議會二）：x = f·X/Z、h = f·H/Z，所以 x/h = X/H，跟距離 Z 與焦距都無關。
+// 對時間窗裡的 x/h 做 Theil–Sen 直線擬合、外推 ttc 秒，乘上這類物體的身高就是撞上那一刻的橫向距離（公尺）。
+// 一個時間窗只用一種尺度（換尺度會讓比值跳一下，被當成橫向速度）：上下都沒被切到用框高；腳被切掉但頭看得到用頭頂到地平線；
+// 都不行（或被側邊切到）就不判斷，回傳 null。win 的每一項是 [時間, x, y, 高, 寬, 頭頂離地平線, 側邊切, 下緣切, 上緣切]；
+// xShift 把存起來的 x 換回現在畫面、以行走方向為 0
+export function scaleInvariantLanding(win, xShift, rawLabel, ttc, wasHit = false) {
+  const heightCm = C.CLASS_REAL_HEIGHT_CM[rawLabel];
+  if (heightCm == null || !Number.isFinite(ttc)) return null;
+  let pts = win.filter(p => !p[6] && !p[7] && !p[8]).map(p => [p[0], (p[1] + xShift) / p[3]]), scaleM = heightCm / 100;
+  if (pts.length < C.TRAJECTORY_MIN_FRAMES && heightCm > C.CAMERA_HEIGHT_CM) {
+    pts = win.filter(p => !p[6] && !p[8] && p[5] >= C.TOP_SCALE_MIN_PX).map(p => [p[0], (p[1] + xShift) / p[5]]);
+    scaleM = (heightCm - C.CAMERA_HEIGHT_CM) / 100;
+  }
+  if (pts.length < C.TRAJECTORY_MIN_FRAMES) return null;
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+    if (pts[j][0] > pts[i][0]) slopes.push((pts[j][1] - pts[i][1]) / (pts[j][0] - pts[i][0]));
+  }
+  if (!slopes.length) return null;
+  const slope = median(slopes), last = pts[pts.length - 1][0];
+  const now = median(pts.map(([t, r]) => r + slope * (last - t)));
+  const xAtContactM = (now + slope * ttc) * scaleM;
+  const radius = hitRadiusM(ttc) * (wasHit ? C.HIT_RELEASE_SCALE : 1);
+  return { xAtContactM, hit: Math.abs(xAtContactM) <= radius };
 }
 
 // 判定「會撞上」的半徑（公尺）：愈久以後的事愈不準，半徑愈小

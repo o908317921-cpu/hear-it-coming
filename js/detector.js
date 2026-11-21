@@ -512,8 +512,11 @@ export class HazardDetector {
       // 單一幀的抖動不能喊「危險」：要連續一段時間都判定會撞上才算；快撞上了就少等一點，腳已經出畫面（就在面前）完全不等。
       // 用「秒」不用「幾幀」：CPU 手機每秒約 4 幀，數幀數的話同樣設定要多等 3 倍（議會結論）。每秒 10 幀時與原本完全相同
       const zoneOn = Number.isFinite(heldTtc) && heldTtc <= C.TTC_DANGER_SEC && inCollisionZone;
-      const zoneHits = zoneOn ? (prev ? prev.zoneHits : 0) + (isPredicted ? 0 : 1) : 0;
-      const zoneSince = zoneOn ? (prev?.zoneSince ?? (isPredicted ? null : now)) : null;
+      // 只限剛出現的物體（追蹤不到 ZONE_MIN_SPAN_SEC）：已經追蹤一陣子、真的在靠近的，暫留本來就是在補成長率的短暫低點，照舊算
+      const youngTrack = !prev || now - prev.firstSeen < C.ZONE_MIN_SPAN_SEC;
+      const newEvidence = !isPredicted && (!C.ZONE_HITS_MEASURED_ONLY || measured || !youngTrack);
+      const zoneHits = zoneOn ? (prev ? prev.zoneHits : 0) + (newEvidence ? 1 : 0) : 0;
+      const zoneSince = zoneOn ? (prev?.zoneSince ?? (newEvidence ? now : null)) : null;
       const trackedLongEnough = win.length > 1 && win[win.length - 1][0] - win[0][0]
         >= (height >= C.ZONE_NEAR_HEIGHT_RATIO * h ? C.ZONE_MIN_SPAN_NEAR_SEC : C.ZONE_MIN_SPAN_SEC);
       const far = height < C.ZONE_FAR_HEIGHT_RATIO * h;

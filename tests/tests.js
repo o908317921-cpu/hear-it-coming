@@ -870,6 +870,20 @@ test("暫留不能把一個假 TTC 倒數成「停」：之後量到框沒在長
   assert(before === "DANGER" || before === "STOP", `（對照）沒放掉暫留時會誤報，實際 ${before}`);
   assert(after !== "DANGER" && after !== "STOP", `放掉暫留後不該喊危險／停，實際 ${after}`);
 });
+test("剛出現的近距離物體：一次雜訊 TTC 加一幀暫留，不能湊成兩次確認就喊「停」", async () => {
+  // 模擬裡「往前走遠」剩下的誤報（tests/sim.js 固定亂數種子重現）：4 m 處的人一出現，框在畫面下緣切進切出，
+  // 第三幀量到假 TTC，下一幀暫留，原本就湊滿兩次確認
+  const { SCENARIOS, runOnce } = await import("./sim.js");
+  const away = SCENARIOS.find(s => s.name === "往前走遠");
+  const danger = async on => {
+    const saved = C.ZONE_HITS_MEASURED_ONLY;
+    C.ZONE_HITS_MEASURED_ONLY = on;
+    try { return (await runOnce(away, 10, 28010)).first.DANGER; } finally { C.ZONE_HITS_MEASURED_ONLY = saved; }
+  };
+  const [before, after] = [await danger(false), await danger(true)];
+  assert(before != null, "（對照）暫留幀也算確認時會誤報");
+  assert(after == null, `只算真的量到的幀後不該喊危險／停，實際第 ${after?.toFixed(2)} 秒喊了`);
+});
 test("TTC 短暫中斷時「會撞上」也跟著暫留", async () => {
   const det = new HazardDetector(new FakeYolo(n => 1190 / (6 - 0.15 * Math.min(n, 13))), null);
   const states = [];

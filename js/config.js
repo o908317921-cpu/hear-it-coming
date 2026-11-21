@@ -206,6 +206,9 @@ export const C = {
   // 往前走遠的人換了追蹤編號，前三個框剛好抖成在長大，一個假 TTC 被倒數 6 幀倒數到「停」（模擬：往前走遠誤報）
   TTC_HOLD_RELEASE_ON_CONTRADICTION: true,
   TTC_HOLD_CONTRADICT_RATIO: 0.5,
+  // 剛出現的物體（追蹤不到 ZONE_MIN_SPAN_SEC）：「連續判定會撞上 N 次」只算這一幀真的量到 TTC 的（暫留倒數的那幾幀不算新證據）。
+  // 剛出現的近距離物體，第三幀量到一個雜訊 TTC、下一幀暫留，原本就湊滿兩次喊「停」（模擬：往前走遠剩下的誤報）
+  ZONE_HITS_MEASURED_ONLY: true,
   LOOMING_MIN_GROWTH_PX: 8,       // 回歸的時間窗內框高至少要長大這麼多像素（或下面的比例，取大者）才算靠近：比這個小就是抖動
   LOOMING_MIN_GROWTH_RATIO: 0.05,
   GROWTH_MAX_LOOMING_RATIO: 3.0,  // 面積變化率最多算到「框高成長率」的這麼多倍（真的靠近時是 2 倍）：框高沒在長大、只有面積跳動，是遮擋或框錯，不算「很快」

@@ -201,6 +201,11 @@ export const C = {
   OFF_COURSE_RISK_SCALE: 0.5,
   TTC_WARNING_MULTIPLIER: 1.0,
   TTC_HOLD_FRAMES: 6,
+  // TTC 暫留是給「這一幀量不到」用的（漏抓、預測幀、成長率剛好低於門檻）。這一幀明明量得到、
+  // 而且量到的成長率連暫留倒數的一半都不到（或在變小）就是證據相反：不再暫留。
+  // 往前走遠的人換了追蹤編號，前三個框剛好抖成在長大，一個假 TTC 被倒數 6 幀倒數到「停」（模擬：往前走遠誤報）
+  TTC_HOLD_RELEASE_ON_CONTRADICTION: true,
+  TTC_HOLD_CONTRADICT_RATIO: 0.5,
   LOOMING_MIN_GROWTH_PX: 8,       // 回歸的時間窗內框高至少要長大這麼多像素（或下面的比例，取大者）才算靠近：比這個小就是抖動
   LOOMING_MIN_GROWTH_RATIO: 0.05,
   GROWTH_MAX_LOOMING_RATIO: 3.0,  // 面積變化率最多算到「框高成長率」的這麼多倍（真的靠近時是 2 倍）：框高沒在長大、只有面積跳動，是遮擋或框錯，不算「很快」

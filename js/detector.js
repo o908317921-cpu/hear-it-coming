@@ -3,7 +3,7 @@ import { C, classLabel } from "./config.js";
 import {
   classifyApproach, classifyGrowth, classifyProximity, collisionProbability, combinedRiskPct, computeIou,
   depthDistanceM, distanceEstimates, effectiveOccupancy, estimatePersonDistanceCm, findDepthHazards, median,
-  groundApproach, groundPoint, groundPointByHeight, groundPlaneDistanceM, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, predictCollision,
+  groundApproach, groundPoint, groundPointByHeight, groundPlaneDistanceM, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, loomingRate, predictCollision,
   regressionWindow, relativeVelocity, scaleInvariantLanding, trajectoryOnCourse, truncationSides,
 } from "./analysis.js";
 import { maskElongation } from "./yolo.js";
@@ -493,8 +493,14 @@ export class HazardDetector {
         && !shrinking && now - prev.ttcMeasuredAt <= C.TTC_CLIPPED_HOLD_SEC;
       const measured = Number.isFinite(ttc) && !(clippedHold && ttc > countdown) && !(groundHold && !inCollisionZone);
       let heldTtc, holdCount;
+      // 這一幀真的量得到（真的偵測、沒被擋、框完全沒被畫面切到、完整的框高樣本夠），而且框高說「沒有在靠近」：
+      // 暫留的倒數不能繼續。量不到（框被切、從側邊進來、被擋）的情況照舊暫留，那才是暫留要處理的
+      const fullSamples = win.filter(p => !p[6] && !p[7] && !p[8]);
+      const contradicted = C.TTC_HOLD_RELEASE_ON_CONTRADICTION && !isPredicted && !occludedByFront && !sidesForTtc.size
+        && fullSamples.length >= C.TRAJECTORY_MIN_FRAMES
+        && loomingRate(fullSamples.map(p => p[0]), fullSamples.map(p => p[3])) < C.TTC_HOLD_CONTRADICT_RATIO / Math.max(countdown, 0.1);
       if (measured) [heldTtc, holdCount] = [ttc, 0];
-      else if (Number.isFinite(countdown) && (prevHold < C.TTC_HOLD_FRAMES || clippedHold || groundHold)) [heldTtc, holdCount] = [countdown, prevHold + 1];
+      else if (Number.isFinite(countdown) && ((prevHold < C.TTC_HOLD_FRAMES && !contradicted) || clippedHold || groundHold)) [heldTtc, holdCount] = [countdown, prevHold + 1];
       else [heldTtc, holdCount] = [Infinity, 0];
       const ttcMeasuredAt = measured ? now : (prev ? prev.ttcMeasuredAt : now);
       // dh/dt 短暫低於門檻時 TTC 暫留，「會不會撞上」也要跟著暫留，否則警報與警示音會一閃一閃

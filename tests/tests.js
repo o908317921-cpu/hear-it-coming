@@ -850,6 +850,26 @@ test("面積真的大幅變化時，幾幀後就接受，不會永遠凍結", as
   for (let i = 0; i < 20; i++) tracks = await det.process(scene, (i + 1) / 10);
   assert(tracks[0].occupancyRatio > 0.05, `面積比例 ${tracks[0].occupancyRatio}`);
 });
+test("暫留不能把一個假 TTC 倒數成「停」：之後量到框沒在長大就放掉", async () => {
+  // 模擬裡「往前走遠」的誤報：換了追蹤編號，前三個框剛好抖成在長大（161→180→181），之後框高都沒變
+  const hs = [161, 180, 181, 174, 170, 181, 176, 178, 173, 179, 175, 177, 172, 178, 176];
+  const worst = async release => {
+    const saved = C.TTC_HOLD_RELEASE_ON_CONTRADICTION;
+    C.TTC_HOLD_RELEASE_ON_CONTRADICTION = release;
+    try {
+      const det = new HazardDetector(new FakeYolo(n => hs[Math.min(n, hs.length - 1)]), null);
+      let top = "SAFE";
+      for (let i = 0; i < hs.length; i++) for (const tr of await det.process(scene, (i + 1) / 10)) {
+        const lv = alertLevelOf(tr);
+        if (["NOTICE", "DANGER", "STOP"].indexOf(lv) > ["NOTICE", "DANGER", "STOP"].indexOf(top)) top = lv;
+      }
+      return top;
+    } finally { C.TTC_HOLD_RELEASE_ON_CONTRADICTION = saved; }
+  };
+  const [before, after] = [await worst(false), await worst(true)];
+  assert(before === "DANGER" || before === "STOP", `（對照）沒放掉暫留時會誤報，實際 ${before}`);
+  assert(after !== "DANGER" && after !== "STOP", `放掉暫留後不該喊危險／停，實際 ${after}`);
+});
 test("TTC 短暫中斷時「會撞上」也跟著暫留", async () => {
   const det = new HazardDetector(new FakeYolo(n => 1190 / (6 - 0.15 * Math.min(n, 13))), null);
   const states = [];

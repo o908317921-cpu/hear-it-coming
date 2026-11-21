@@ -186,7 +186,7 @@ export const C = {
   EMA_ALPHA: 0.3,
 
   // ---------- 軌跡碰撞預測 ----------
-  TRAJECTORY_HISTORY_LEN: 8,      // 最近幾次「真正偵測」（預測幀沒有新的框高資訊，不算樣本）
+  TRAJECTORY_HISTORY_LEN: 24,     // 最近幾次「真正偵測」（預測幀沒有新的框高資訊，不算樣本）；迫近率只用近 TRAJECTORY_WINDOW_SEC 秒
   TRAJECTORY_WINDOW_SEC: 1.0,
   TRAJECTORY_MIN_FRAMES: 3,
   TTC_MAX_CLAMP_SEC: 10,
@@ -267,6 +267,10 @@ export const C = {
   // 會撞上的人方位固定、框越來越大，這個比值外推到撞上那一刻會接近 0；錯身 0.9 m 的人一直停在 0.9 ÷ 1.7 ≈ 0.53。
   // 算不出來（框被側邊切、上下都切）時退回原本的畫面像素外推。設成 false 就是舊版
   LANDING_SCALE_INVARIANT: true,
+  // x/h 的橫向變化在等速時是嚴格的直線（X 隨時間線性變化），時間窗拉長不會有偏差、雜訊卻小很多（斜率雜訊約 ∝ 時間窗^1.5）。
+  // 迫近率（1/h）也是直線但要跟著加速減速，所以維持 1 秒；落點的橫向擬合另外用這個較長的時間窗
+  // 模擬：錯身 0.9 m 誤報 21→8/48（1.0 秒時外推的落點在 0.5～1.2 m 之間亂跳，半徑只有 0.6 m），斜向、腳踏車也略好
+  SI_WINDOW_SEC: 1.5,
   RECEDING_MIN_RATE: 0.15,        // 框高每秒縮小超過這個比例才算遠離；用比例，近處的大框才不會因為抖動被當成遠離
   ATTENTION_GROWTH_PCT_S: 8.0,
 

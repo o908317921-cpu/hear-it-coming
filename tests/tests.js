@@ -884,6 +884,21 @@ test("剛出現的近距離物體：一次雜訊 TTC 加一幀暫留，不能湊
   assert(before != null, "（對照）暫留幀也算確認時會誤報");
   assert(after == null, `只算真的量到的幀後不該喊危險／停，實際第 ${after?.toFixed(2)} 秒喊了`);
 });
+test("錯身 0.9 m：落點的橫向擬合用較長的時間窗，外推不再亂跳進半徑", async () => {
+  // tests/sim.js 固定亂數重現：1 秒時間窗外推的落點在 0.5～1.2 m 間跳，半徑 0.6 m，會誤報；1.5 秒就穩了
+  const { SCENARIOS, runOnce } = await import("./sim.js");
+  const pass = SCENARIOS.find(s => s.name === "錯身而過 0.9 m");
+  const saved = C.SI_WINDOW_SEC;
+  try {
+    for (const seed of [21010, 22010]) {
+      C.SI_WINDOW_SEC = 1.0;
+      assert((await runOnce(pass, 10, seed)).first.DANGER != null, `（對照）1 秒時間窗會誤報（種子 ${seed}）`);
+      C.SI_WINDOW_SEC = saved;
+      const at = (await runOnce(pass, 10, seed)).first.DANGER;
+      assert(at == null, `預設時間窗不該誤報，實際第 ${at?.toFixed(2)} 秒喊了（種子 ${seed}）`);
+    }
+  } finally { C.SI_WINDOW_SEC = saved; }
+});
 test("TTC 短暫中斷時「會撞上」也跟著暫留", async () => {
   const det = new HazardDetector(new FakeYolo(n => 1190 / (6 - 0.15 * Math.min(n, 13))), null);
   const states = [];

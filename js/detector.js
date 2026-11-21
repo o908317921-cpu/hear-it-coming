@@ -473,7 +473,7 @@ export class HazardDetector {
       }
       // 議會二：與尺度無關的落點取代畫面像素外推（實驗開關 LANDING_SCALE_INVARIANT）
       const siLanding = C.LANDING_SCALE_INVARIANT && prev && !occludedByFront
-        ? scaleInvariantLanding(win, motion.offsetX - pathCenterX, det.rawLabel, ttc, prev.siHit) : null;
+        ? scaleInvariantLanding(trajHistory.filter(p => now - p[0] <= Math.max(C.SI_WINDOW_SEC, C.TRAJECTORY_WINDOW_SEC)), motion.offsetX - pathCenterX, det.rawLabel, ttc, prev.siHit) : null;
       if (siLanding && ttcSource !== "ground") inCollisionZone = siLanding.hit;
       // 實驗三（消融）ABLATE_LANDING：不看預測落點，只要在靠近（TTC 有限）就算在路徑上
       if (C.ABLATE_LANDING) inCollisionZone = Number.isFinite(ttc);

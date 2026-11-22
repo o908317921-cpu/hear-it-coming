@@ -248,9 +248,12 @@ export function loomingDhDt(win, height, sides, reachesPath = false, frameHeight
 export function scaleInvariantLanding(win, xShift, rawLabel, ttc, wasHit = false) {
   const heightCm = C.CLASS_REAL_HEIGHT_CM[rawLabel];
   if (heightCm == null || !Number.isFinite(ttc)) return null;
-  let pts = win.filter(p => !p[6] && !p[7] && !p[8]).map(p => [p[0], (p[1] + xShift) / p[3]]), scaleM = heightCm / 100;
+  // 被側邊切到的框：有推回的中心（第 10 欄）就用它
+  const sideOk = p => !p[6] || (C.SI_SIDE_CUT_CORRECT && p[9] != null);
+  const cx = p => (p[6] ? p[9] : p[1]);
+  let pts = win.filter(p => sideOk(p) && !p[7] && !p[8]).map(p => [p[0], (cx(p) + xShift) / p[3]]), scaleM = heightCm / 100;
   if (pts.length < C.TRAJECTORY_MIN_FRAMES && heightCm > C.CAMERA_HEIGHT_CM) {
-    pts = win.filter(p => !p[6] && !p[8] && p[5] >= C.TOP_SCALE_MIN_PX).map(p => [p[0], (p[1] + xShift) / p[5]]);
+    pts = win.filter(p => sideOk(p) && !p[8] && p[5] >= C.TOP_SCALE_MIN_PX).map(p => [p[0], (cx(p) + xShift) / p[5]]);
     scaleM = (heightCm - C.CAMERA_HEIGHT_CM) / 100;
   }
   if (pts.length < C.TRAJECTORY_MIN_FRAMES) return null;

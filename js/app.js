@@ -1,6 +1,6 @@
 // 主程式：開鏡頭 → 每一幀交給偵測器 → 警報規則 → 語音／警示音／震動 → 畫框與面板。
 // 全部在手機瀏覽器裡執行，不需要電腦、不需要 Python，影像也不會離開手機。
-import { C, loadSettings } from "./config.js";
+import { C, loadSettings, SETTINGS_OVERRIDES } from "./config.js";
 import { riskColor, focalPx } from "./analysis.js";
 import { AlertEngine, frameSummary, sceneSummary } from "./alerts.js";
 import { AudioOutput } from "./audio.js";
@@ -590,10 +590,14 @@ function startErrorText(e) {
 // 第一幀算出來才念：有些手機要等好幾秒，還沒開始看就說準備好，會讓人以為已經有保護
 function announceReady() {
   const steps = ["準備好了，開始偵測。"];
+  // 威脅模型 R02：設定被 settings.json 改過時要讓使用者知道，不能悄悄生效
+  if (SETTINGS_OVERRIDES.length) steps.push(`注意，這次用的是自訂設定，改了 ${SETTINGS_OVERRIDES.length} 項。`);
   if (frontCamera) steps.push("目前用的是前鏡頭，請改用有後鏡頭的手機。");
   if (!navigator.wakeLock) steps.push("這支手機可能會自動鎖定螢幕，螢幕一關偵測就會停止，請把自動鎖定關閉。");
   // 新的 iPhone 也走這條路，速度不一定慢：只說真正的差別。真的太慢時，警報規則會另外說「偵測變慢」
-  if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) steps.push("這支手機不會提醒頭上的障礙。");
+  // 威脅模型 R05：網址的 ?nogpu 會關掉深度偵測（別人傳的連結或 QR 也可能帶著），要說出原因
+  const forcedCpu = new URLSearchParams(location.search).has("nogpu") && !!navigator.gpu;
+  if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) steps.push(forcedCpu ? "網址設定成不用顯示晶片，所以不會提醒頭上的障礙。" : "這支手機不會提醒頭上的障礙。");
   else if (depth && !depthReadyTold) steps.push("頭上障礙的偵測還在載入，行人和車輛已經可以偵測。");
   audio.speakSteps(steps);
   $("sceneBtn").focus();
@@ -868,7 +872,7 @@ function showQr() {
   if (!matchMedia("(hover:hover) and (pointer:fine)").matches) return;
   if (/^(localhost|127\.|\[::1\]$)/.test(location.hostname) || location.protocol !== "https:") return;
   try {
-    const svg = qrSvg(location.href);
+    const svg = qrSvg(location.origin + location.pathname);   // 不帶 ?nogpu 等參數：掃的人拿到的是完整功能（威脅模型 R05）
     if (!svg) return;              // 網址太長：只顯示文字
     box.prepend(svg);
     box.classList.add("has-code");

@@ -91,8 +91,9 @@ export class AudioOutput {
   }
 
   // 只有念警報才算：念操作說明時不能讓警報規則以為警報還沒解除
+  // 路口提示（紅綠燈、斑馬線，優先順序 0.5）不算警報：念它的時候警示音照響
   alarmSpeaking() {
-    return this.speaking() && this.speakingPri > 0;
+    return this.speaking() && this.speakingPri >= C.SPEECH_PRIORITY.speed;
   }
 
   // 依優先順序念語音：更緊急的可以打斷正在念的，排隊中已有一句時不再疊加過時警報。
@@ -102,7 +103,9 @@ export class AudioOutput {
     if ((!this.enabled && !force && pri < 4) || !s) return;
     let queued = false;
     if (s.speaking || s.pending) {
-      if (pri > this.speakingPri) this.hush();
+      // 「停」不能被排隊中的句子擋掉：第一個人的「停」正在念、第二個人的「危險」在排隊時，
+      // 第二個人的「停」原本會被丟掉，之後也不會再念（alerts.js 已經記成念過了）
+      if (pri > this.speakingPri || (pri >= C.SPEECH_PRIORITY.urgent && s.pending)) this.hush();
       else if (s.pending) return;
       else queued = true;
     } else {
@@ -193,14 +196,20 @@ export class AudioOutput {
     if (!this.running || id !== this.loopId) return;
     // 來電等中斷之後，聲音引擎不一定會自己恢復（iPhone）
     if (this.ctx && this.ctx.state !== "running") this.ctx.resume().catch(() => {});
-    if (!this.ctx || !this.beep) {
+    if (!this.beep) {
       setTimeout(() => this.beepLoop(id), 100);
       return;
     }
     const [freq, on, off] = this.beep;
+    // 聲音引擎沒開起來（解鎖失敗）時至少還要震動
+    if (!this.ctx) {
+      if (navigator.vibrate) navigator.vibrate(on);
+      setTimeout(() => this.beepLoop(id), on + off);
+      return;
+    }
     // 念警報時先讓路；念操作說明、目前狀況時照響，不能因為在聽說明就沒有警示音。
     // 語音送出後到真的出聲之前也照響：這段空檔完全沒聲音的話，等於撞上了才有反應
-    if (this.enabled && (!this.speaking() || this.speakingPri <= 0 || !this.voiceStarted)) this.tone(freq, on, this.ctx.currentTime + 0.02, this.beepPan);
+    if (this.enabled && (!this.speaking() || this.speakingPri < C.SPEECH_PRIORITY.speed || !this.voiceStarted)) this.tone(freq, on, this.ctx.currentTime + 0.02, this.beepPan);
     if (navigator.vibrate) navigator.vibrate(on);
     setTimeout(() => this.beepLoop(id), on + off);
   }

@@ -8,9 +8,10 @@ import { ByteTracker } from "../js/tracker.js";
 import { HazardDetector } from "../js/detector.js";
 import { CameraMotionEstimator } from "../js/motion.js";
 import { keepLargestComponent, maskElongation } from "../js/yolo.js";
-import { downloadWithRetry } from "../js/ort.js";
+import { downloadWithRetry, INTEGRITY, sha256Hex } from "../js/ort.js";
 import { findGroundSteps, trafficLightColor, crosswalkStripes, SceneCues, pickLight, pedestrianSignals } from "../js/scene.js";
 import { FieldLog } from "../js/fieldlog.js";
+import { AudioOutput } from "../js/audio.js";
 
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
@@ -76,13 +77,15 @@ test("TTC 公式", () => {
 });
 test("相對 TTC 門檻（實驗開關）：遠處小框快速靠近也算得出來，關掉時維持原樣", () => {
   // 40 px 高、每秒長 10 px：TTC 4 秒，但低於固定的 15 px/s
+  const saved = C.TTC_FLOOR_NORMALIZED;
+  C.TTC_FLOOR_NORMALIZED = false;
   eq(A.computeTtc(40, 10), Infinity);
   C.TTC_FLOOR_NORMALIZED = true;
   try {
     eq(A.computeTtc(40, 10), 4);
     eq(A.computeTtc(400, 20), Infinity);   // 大框每秒只長 5%：TTC 20 秒，不算
     eq(A.computeTtc(10, 2), Infinity);     // 低於絕對下限：當成抖動
-  } finally { C.TTC_FLOOR_NORMALIZED = false; }
+  } finally { C.TTC_FLOOR_NORMALIZED = saved; }
 });
 test("線性回歸斜率", () => {
   close(A.linearSlope([0, 1, 2, 3], [1, 3, 5, 7]), 2);
@@ -305,6 +308,38 @@ test("settings.json：打錯名稱或型別不符時略過", () => {
   const warnings = applyUserSettings({ _note: "註解", A_B: 2, FLAG: "yes", MAP: { y: 5 }, TYPO: 1, lower: 3 }, target);
   eq(target, { A_B: 2, FLAG: true, MAP: { x: 1, y: 5 } });
   eq(warnings.length, 3);
+});
+test("模型與執行環境的雜湊跟網站上的檔案一致（換模型時要一起更新 js/ort.js 的 INTEGRITY）", async () => {
+  for (const [name, want] of Object.entries(INTEGRITY)) {
+    const url = (name.endsWith(".wasm") ? "../vendor/ort/" : "../models/") + name;
+    const res = await fetch(url, { cache: "no-store" });
+    assert(res.ok, `${name} 讀不到`);
+    eq(await sha256Hex(new Uint8Array(await res.arrayBuffer())), want, name);
+  }
+});
+test("settings.json：安全門檻超出範圍、外部模型網址、打開消融開關都略過（威脅模型 R02）", () => {
+  const target = { TTC_DANGER_SEC: 3, TTC_URGENT_SEC: 1.8, MODEL_URL: "models/a.onnx", ABLATE_LANDING: false };
+  const warnings = applyUserSettings({ TTC_DANGER_SEC: 0.1, TTC_URGENT_SEC: 2, MODEL_URL: "https://evil.example/m.onnx", ABLATE_LANDING: true }, target);
+  eq(target, { TTC_DANGER_SEC: 3, TTC_URGENT_SEC: 2, MODEL_URL: "models/a.onnx", ABLATE_LANDING: false });
+  eq(warnings.length, 3);
+  applyUserSettings({ MODEL_URL: "models/b.onnx" }, target);
+  eq(target.MODEL_URL, "models/b.onnx");
+});
+test("追蹤器：走路晃動中漏抓一幀，用實際累積的鏡頭位移推算，ID 不變", () => {
+  // 手機半步換一次方向：漏抓期間畫面實際只移了 +10 px，但「現在」的轉動速度是往回 -300 px/s
+  const run = useOffset => {
+    const saved = C.TRACK_GMC_OFFSET;
+    C.TRACK_GMC_OFFSET = useOffset;
+    try {
+      const tr = new ByteTracker(), det = x => [{ box: [x, 100, x + 60, 300], score: 0.9, rawLabel: "person" }];
+      const a = tr.update(det(100), 0, { vx: 0, vy: 0, offsetX: 0, offsetY: 0 })[0].id;
+      tr.update([], 0.25, { vx: 300, vy: 0, offsetX: 6, offsetY: 0 });
+      const b = tr.update(det(110), 0.5, { vx: -300, vy: 0, offsetX: 10, offsetY: 0 })[0].id;
+      return a === b;
+    } finally { C.TRACK_GMC_OFFSET = saved; }
+  };
+  assert(!run(false), "（對照）用現在的轉動速度乘時間會配不上");
+  assert(run(true), "用累積位移要配得上，ID 不變");
 });
 test("追蹤器：漏抓兩次後 ID 不變", () => {
   const tr = new ByteTracker();
@@ -883,6 +918,43 @@ test("剛出現的近距離物體：一次雜訊 TTC 加一幀暫留，不能湊
   const [before, after] = [await danger(false), await danger(true)];
   assert(before != null, "（對照）暫留幀也算確認時會誤報");
   assert(after == null, `只算真的量到的幀後不該喊危險／停，實際第 ${after?.toFixed(2)} 秒喊了`);
+});
+test("斜向切入的人在畫面邊緣、框被切掉一邊：用沒切到的那邊推回中心，不能漏報", async () => {
+  // tests/sim.js 固定亂數重現：每秒 4 幀，斜向走來的人一直在畫面左緣，原本整段都沒喊
+  const { SCENARIOS, runOnce } = await import("./sim.js");
+  const oblique = SCENARIOS.find(s => s.name === "斜向切入、會撞上");
+  const saved = C.SI_SIDE_CUT_CORRECT;
+  try {
+    C.SI_SIDE_CUT_CORRECT = false;
+    assert((await runOnce(oblique, 4, 12004)).first.DANGER == null, "（對照）不修正時會漏報");
+    C.SI_SIDE_CUT_CORRECT = true;
+    assert((await runOnce(oblique, 4, 12004)).first.DANGER != null, "修正後要喊危險");
+  } finally { C.SI_SIDE_CUT_CORRECT = saved; }
+});
+test("走過來停在面前 2.5 m（腳已出畫面）：停下後 1 秒內不再喊危險／停", async () => {
+  // tests/sim.js 固定亂數重現：腳被切掉時暫留原本不會被「沒在靠近」放掉，雜訊 TTC 倒數到又喊「停」，整段沒停過
+  const { EXTRA, runOnce } = await import("./sim.js");
+  const s = EXTRA.find(x => x.stopZ === 2.5), stopT = (s.z0 - s.stopZ) / 1.4;
+  const orig = HazardDetector.prototype.process;
+  let last = null;
+  HazardDetector.prototype.process = async function (f, t, g) {
+    const r = await orig.call(this, f, t, g);
+    if (r.some(tr => ["DANGER", "STOP"].includes(alertLevelOf(tr)))) last = t;
+    return r;
+  };
+  try { await runOnce(s, 4, 9004); } finally { HazardDetector.prototype.process = orig; }
+  assert(last != null && last - stopT < 1, `停下後還喊到第 ${(last - stopT).toFixed(2)} 秒`);
+});
+test("錯身 0.9 m：x/h 說會錯開時，腳底向量不能把它推翻成會撞上", async () => {
+  const { SCENARIOS, runOnce } = await import("./sim.js");
+  const pass = SCENARIOS.find(s => s.name === "錯身而過 0.9 m");
+  const saved = C.SI_VETOES_GROUND;
+  try {
+    C.SI_VETOES_GROUND = false;
+    assert((await runOnce(pass, 7, 32007)).first.DANGER != null, "（對照）腳底向量推翻時會誤報");
+    C.SI_VETOES_GROUND = true;
+    assert((await runOnce(pass, 7, 32007)).first.DANGER == null, "x/h 否決後不該誤報");
+  } finally { C.SI_VETOES_GROUND = saved; }
 });
 test("錯身 0.9 m：落點的橫向擬合用較長的時間窗，外推不再亂跳進半徑", async () => {
   // tests/sim.js 固定亂數重現：1 秒時間窗外推的落點在 0.5～1.2 m 間跳，半徑 0.6 m，會誤報；1.5 秒就穩了
@@ -1469,6 +1541,32 @@ test("實測紀錄：誤報標記、漏報、摘要、CSV", () => {
   assert(csv.includes("前方紅燈,,,,,,,誤報"), "誤報標在最近那一句");
   eq(sum.ttc["危險"], { n: 1, mean: 2.3 }, "碰撞時間統計");
   eq(sum.ttc["停"], { n: 0, mean: null });
+});
+test("語音：第一個人的「停」正在念、別句在排隊時，第二個人的「停」不能被丟掉；路口提示不算警報", () => {
+  // 假的語音引擎：記下念了什麼、被取消幾次
+  const spoken = [], fake = { speaking: false, pending: false, cancel() { fake.speaking = fake.pending = false; spoken.push("<cancel>"); },
+    speak(u) { if (fake.speaking) fake.pending = true; else fake.speaking = true; spoken.push(u.text); }, getVoices: () => [] };
+  const desc = Object.getOwnPropertyDescriptor(window, "speechSynthesis");
+  Object.defineProperty(window, "speechSynthesis", { value: fake, configurable: true });
+  try {
+    const a = new AudioOutput();
+    a.say("停", C.SPEECH_PRIORITY.urgent);
+    a.say("危險，左前方", C.SPEECH_PRIORITY.ttc);     // 排在後面
+    a.say("停", C.SPEECH_PRIORITY.urgent);            // 第二個人
+    eq(spoken.filter(x => x === "停").length, 2, JSON.stringify(spoken));
+    const b = new AudioOutput();
+    b.say("前方紅燈", C.SPEECH_PRIORITY.scene);
+    assert(!b.alarmSpeaking(), "路口提示不能讓警報規則以為警報還在念");
+  } finally {
+    if (desc) Object.defineProperty(window, "speechSynthesis", desc); else delete window.speechSynthesis;
+  }
+});
+test("實測紀錄：超過 30 天的自動刪掉（威脅模型 R07）", () => {
+  const store = memoryStorage(), day = 86400000;
+  store.setItem("hic-fieldlog", JSON.stringify([{ t: Date.now() - 40 * day, type: "start" }, { t: Date.now() - day, type: "start" }]));
+  const log = new FieldLog(store);
+  eq(log.events.length, 1);
+  eq(JSON.parse(store.getItem("hic-fieldlog")).length, 1, "存起來的也要刪");
 });
 test("實測紀錄：效能取樣（實驗四）", () => {
   const log = new FieldLog(memoryStorage());

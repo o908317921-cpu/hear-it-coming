@@ -70,6 +70,10 @@ export const C = {
   TRACK_LOW_CONF: 0.10,           // 已追蹤的物體信心度低到此值仍可延續（第二階段配對）
   TRACK_BUFFER_FRAMES: 30,        // 遺失的軌跡保留幾次偵測
   TRACK_MATCH_THRESH: 0.8,
+  // 推算軌跡位置時，鏡頭轉動用「上次看到它之後實際累積的畫面位移」，不用「現在的轉動速度 × 經過時間」。
+  // 走路時手機半步就換一次方向，漏抓一兩幀之後用現在的速度去乘，推算的框會跑到畫面另一邊，配不上就變成新的追蹤編號、
+  // TTC 的歷史從零開始（模擬：每秒 4 幀的腳踏車警報晚 0.5～1.3 秒）
+  TRACK_GMC_OFFSET: true,
   TRACK_LOST_HOLD_SEC: 0.5,       // YOLO 沒回傳某物體時，用預測位置在畫面上暫留多久
 
   // ---------- 單眼相機距離估算 ----------
@@ -251,7 +255,8 @@ export const C = {
   MIN_DH_DT_FOR_TTC: 15.0,
   // 實驗開關（預設關）：固定 15 px/s 會讓「很遠但很快」的小框（TTC ≤ h/15）永遠算不出 TTC。
   // 開啟後改用相對門檻：(dh/dt)/h ≥ TTC_FLOOR_REL（即 TTC ≤ 1/TTC_FLOOR_REL 秒），再加一個很小的絕對下限擋抖動
-  TTC_FLOOR_NORMALIZED: false,
+  // 模擬（其他修正都做完後）：一般 94→95%、加倍雜訊 71→73%、每秒 3 幀 68→70%，錯身、路邊等誤報不變，所以改成預設開
+  TTC_FLOOR_NORMALIZED: true,
   TTC_FLOOR_REL: 0.125,
   TTC_FLOOR_ABS_MIN: 3.0,
   // 實驗開關（預設關，議會「minimal-core」）：TTC 改用 1/h 擬合斜率的單邊信賴下界（Sen 法），
@@ -271,6 +276,13 @@ export const C = {
   // 迫近率（1/h）也是直線但要跟著加速減速，所以維持 1 秒；落點的橫向擬合另外用這個較長的時間窗
   // 模擬：錯身 0.9 m 誤報 21→8/48（1.0 秒時外推的落點在 0.5～1.2 m 之間亂跳，半徑只有 0.6 m），斜向、腳踏車也略好
   SI_WINDOW_SEC: 1.5,
+  // 框只被畫面左或右邊切到時，另一邊是真的：中心改用「真的那邊 − 半個身寬」（身寬用這條軌跡沒被切時的寬高比），
+  // 這樣的樣本也能算落點。斜向切入的人常常就在畫面邊緣（方位約 22°，手機半視角約 25°）
+  SI_SIDE_CUT_CORRECT: true,
+  SI_DEFAULT_ASPECT: 0.35,        // 還沒看過完整的框時用的寬高比
+  // x/h 落點算得出來而且說「會錯開」時，腳底向量不能把它推翻成「會撞上」（腳底向量的錯身距離受手機俯仰影響大）。
+  // x/h 算不出來（框被切掉等）時腳底向量照舊（模擬：錯身 0.9 m 剩下的誤報多半是這樣來的）
+  SI_VETOES_GROUND: true,
   RECEDING_MIN_RATE: 0.15,        // 框高每秒縮小超過這個比例才算遠離；用比例，近處的大框才不會因為抖動被當成遠離
   ATTENTION_GROWTH_PCT_S: 8.0,
 
@@ -458,6 +470,25 @@ export const classLabel = rawLabel => C.TARGET_CLASSES[rawLabel] ?? C.ANIMAL_CLA
 // 2. 套用 settings.json
 // ============================================================
 // 用 settings.json 覆寫上面的大寫設定。名稱打錯或型別不符時略過並警告，不會讓程式當掉。
+// 威脅模型 R02：settings.json 是遠端檔案，改了就悄悄生效。安全相關的門檻只接受合理範圍內的值，
+// 模型網址只接受同一個網站，消融實驗開關不能從這裡打開；實際改到的設定記在 SETTINGS_OVERRIDES，開始偵測時念出來
+export const SAFE_RANGES = {
+  TTC_DANGER_SEC: [2, 5], TTC_WARN_SEC: [1.5, 4], TTC_URGENT_SEC: [1, 3], COLLISION_ZONE_RATIO: [0.2, 0.6],
+  GROUND_HIT_RADIUS_M: [0.4, 1.0], HIT_RADIUS_FAR_M: [0.3, 0.8], MIN_DH_DT_FOR_TTC: [5, 30],
+  ZONE_CONFIRM_SEC: [0, 0.5], ZONE_CONFIRM_SEC_URGENT: [0, 0.3], ZONE_CONFIRM_SEC_FAR: [0, 0.8], ZONE_CONFIRM_MIN_HITS: [1, 4],
+  TTC_HOLD_FRAMES: [0, 10], SPEECH_RATE: [0.7, 1.6], ALARM_VOICE_REPEAT_SEC: [2, 10], CAMERA_HEIGHT_CM: [60, 180],
+  CAMERA_FOCAL_LENGTH_PX: [300, 2000], STATIC_NEAR_RATIO: [1.02, 1.5], PROXIMITY_ORANGE_RATIO: [0.03, 0.3], PROXIMITY_RED_RATIO: [0.1, 0.6],
+};
+export const SETTINGS_OVERRIDES = [];
+function sameOriginUrl(value) {
+  try {
+    const base = globalThis.location?.href;
+    return !base || new URL(value, base).origin === new URL(base).origin;
+  } catch (e) {
+    return false;
+  }
+}
+
 export function applyUserSettings(data, target = C) {
   const warnings = [];
   for (const [key, value] of Object.entries(data || {})) {
@@ -480,6 +511,20 @@ export function applyUserSettings(data, target = C) {
       warnings.push(`settings.json：「${key}」型別應為 ${typeof old}，已略過`);
       continue;
     }
+    if (key.startsWith("ABLATE_") && value) {
+      warnings.push(`settings.json：「${key}」是離線實驗用的開關，不能從這裡打開，已略過`);
+      continue;
+    }
+    if (key.endsWith("_URL") && !sameOriginUrl(value)) {
+      warnings.push(`settings.json：「${key}」只能指向這個網站上的檔案，已略過`);
+      continue;
+    }
+    const range = SAFE_RANGES[key];
+    if (range && !(value >= range[0] && value <= range[1])) {
+      warnings.push(`settings.json：「${key}」要在 ${range[0]}～${range[1]} 之間，已略過`);
+      continue;
+    }
+    if (target === C && value !== old) SETTINGS_OVERRIDES.push(key);
     target[key] = value;
   }
   return warnings;

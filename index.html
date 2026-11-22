@@ -207,8 +207,14 @@ body:has(#banner.red) #sceneBtn{background:var(--surface);color:var(--text);box-
 // 除錯用的診斷回報：辨識一律在手機上執行，這裡只把錯誤與數字（沒有影像、沒有聲音）傳給自己區網裡開著 serve.py 的電腦。
 // 放到公開網站（GitHub Pages 等）時完全不會送出任何東西。
 (function () {
-  var host = location.hostname;
-  var off = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.)/.test(host), sent = 0;
+  // 威脅模型 R06：改成要手動打開：網址加 ?debug 開啟（記在這支手機，之後不用再加），?nodebug 關閉
+  var host = location.hostname, q = location.search, on = false;
+  try {
+    if (/[?&]debug\b/.test(q)) localStorage.setItem("blindnav-debug", "1");
+    if (/[?&]nodebug\b/.test(q)) localStorage.removeItem("blindnav-debug");
+    on = localStorage.getItem("blindnav-debug") === "1";
+  } catch (e) { on = /[?&]debug\b/.test(q); }
+  var off = !on || !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.)/.test(host), sent = 0;
   window.blindnavLog = function (type, data) {
     if (off || sent > 2000) return;
     sent++;

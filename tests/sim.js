@@ -42,10 +42,21 @@ export const HELD_OUT = [
   { name: "5 m 處突然出現、正面走來", kind: "walker", x0: 0.1, z0: 5, vx: 0, vz: -1.3, u: 1.0 },
 ];
 
+// 額外檢查（不列入上面兩組的統計）：走過來之後停在使用者前面
+export const EXTRA = [
+  { name: "走過來停在 2.5 m（我站著）", kind: "walker", x0: 0.1, z0: 10, vx: 0, vz: -1.4, u: 0, stopZ: 2.5 },
+  { name: "走過來停在 1.5 m（我站著）", kind: "walker", x0: 0.1, z0: 9, vx: 0, vz: -1.4, u: 0, stopZ: 1.5 },
+];
+// 前方距離；有 stopZ 的物體走到那裡就停下（使用者站著不動時）
+function zAt(s, t) {
+  const z = s.z0 + (s.vz - s.u) * t;
+  return s.stopZ != null ? Math.max(s.stopZ, z) : z;
+}
+
 // 會不會撞上、何時撞上：相對位置 Z ≤ 0.6 m 時橫向 |X| ≤ 0.6 m（兩人各半個身寬再加一點）
 export function truth(s) {
   for (let t = 0; t < 20; t += 0.01) {
-    const x = s.x0 + s.vx * t, z = s.z0 + (s.vz - s.u) * t;
+    const x = s.x0 + s.vx * t, z = zAt(s, t);
     if (z <= 0.6) return Math.abs(x) <= 0.6 ? t : null;
   }
   return null;
@@ -66,7 +77,7 @@ function cameraShift(t, walking) {
 // 第 t 秒畫面上的框（沒看到回傳 null）
 function boxAt(s, t, r) {
   const [label, hm, wm] = KINDS[s.kind], camH = C.CAMERA_HEIGHT_CM / 100;
-  const x = s.x0 + s.vx * t, z = s.z0 + (s.vz - s.u) * t;
+  const x = s.x0 + s.vx * t, z = zAt(s, t);
   if (z < 0.3) return null;
   const [dx, dy] = cameraShift(t, s.u > 0);
   const cx = W / 2 + F * x / z + dx, half = F * wm / 2 / z;

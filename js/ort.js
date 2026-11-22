@@ -22,7 +22,27 @@ const ort = await import(withGpu ? "../vendor/ort/ort.webgpu.min.mjs" : "../vend
 
 export { ort };
 
-const CACHE_NAME = "blindnav-models-v1";
+const CACHE_NAME = "blindnav-models-v2";
+// 威脅模型 R04／T06：模型與執行環境的 SHA-256。快取或下載到的內容跟這裡對不上（檔案壞掉、被換掉、
+// 或網站換了新版模型但手機還留著舊的）就不用，重新下載；重新下載還是不對就報錯，不拿來跑。
+// 換模型或升級 onnxruntime-web 時要一起更新這裡（tests/tests.js 會檢查）
+export const INTEGRITY = {
+  "yolo11n-det-320.onnx": "7f21f177c83dad202941286656455fc5f7f96a805ff1fb01435b8d0f93e1989e",
+  "yolo11n-seg.onnx": "2fb697a799f197c85d0c810e7b9434d33389eda60a4cc3476b97253bd26797a0",
+  "depth-anything-v2-small-q4f16.onnx": "eca72971aea64216d767c70c534160de53b5435b588d362bac6dbd5a73f9bf1e",
+  "ort-wasm-simd-threaded.jsep.wasm": "185b0861a6cd6cbdfb057289338090436483cc59e10a7bc83bd167b15531a51b",
+  "ort-wasm-simd-threaded.wasm": "207d02be4591c156b0a98f024f3d58005b5b04c92274d759fb390338c63559ea",
+};
+export async function sha256Hex(bytes) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
+}
+async function intact(url, bytes) {
+  const want = INTEGRITY[new URL(url, globalThis.location?.href).pathname.split("/").pop()];
+  // shortcut: 不是 https（crypto.subtle 不能用）時沒辦法驗證；手機要 https 才能開鏡頭，實際使用一定驗得到
+  if (!want || !globalThis.crypto?.subtle) return true;
+  return await sha256Hex(bytes) === want;
+}
 
 // 多執行緒可以快約 3 倍，但網頁要有跨來源隔離（serve.py 的標頭或 sw.js 補上）才能用。
 // iPhone 用單執行緒：多執行緒的記憶體用量大，分頁被系統關掉比慢一點嚴重得多
@@ -51,16 +71,27 @@ export async function webgpuUsable() {
 export async function fetchModel(url, onProgress = () => {}) {
   let cache = null;
   try {
+    caches.delete("blindnav-models-v1").catch(() => {});   // 舊版沒有驗證的快取
     cache = await caches.open(CACHE_NAME);
     const hit = await cache.match(url);
     if (hit) {
-      onProgress(1);
-      return new Uint8Array(await hit.arrayBuffer());
+      const cached = new Uint8Array(await hit.arrayBuffer());
+      if (await intact(url, cached)) {
+        onProgress(1);
+        return cached;
+      }
+      console.warn("快取的模型跟預期的雜湊不同，重新下載：", url);
+      await cache.delete(url);
     }
   } catch (e) {
     cache = null;             // 無痕模式或非 https 網址時沒有快取，直接下載
   }
   const bytes = await downloadWithRetry(url, onProgress);
+  if (!await intact(url, bytes)) {
+    const error = new Error(`模型檔案內容不對（可能下載壞了或被換掉），不使用：${url}`);
+    error.isDownload = true;  // 再下載一次可能就好了
+    throw error;
+  }
   try { await cache?.put(url, new Response(bytes)); } catch (e) { /* 空間不足時不快取 */ }
   onProgress(1);
   return bytes;

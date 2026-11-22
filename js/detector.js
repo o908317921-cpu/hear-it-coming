@@ -402,9 +402,16 @@ export class HazardDetector {
         if (jumpCount >= C.SCALE_JUMP_CONFIRM) { trajHistory = []; jumpCount = 0; }
         skipSample = jumped && trajHistory.length > 0;
         const sidesNow = truncationSides(det.box, w, h);
+        // 只被左或右邊切到：用沒被切的那一邊推回中心（第 10 欄，給與尺度無關的落點用）
+        let cutCenter = null;
+        if (sidesNow.has("left") !== sidesNow.has("right")) {
+          const full = trajHistory.filter(p => !p[6] && !p[7] && !p[8]);
+          const aspect = full.length ? median(full.map(p => p[4] / p[3])) : C.SI_DEFAULT_ASPECT;
+          cutCenter = (sidesNow.has("left") ? x2 - aspect * height / 2 : x1 + aspect * height / 2) - motion.offsetX;
+        }
         if (!skipSample) trajHistory = trajHistory.concat([[now, footX - motion.offsetX, footY - motion.offsetY, height, x2 - x1,
                                            h / 2 + motion.offsetY - y1, sidesNow.has("left") || sidesNow.has("right"),
-                                           sidesNow.has("bottom"), sidesNow.has("top")]])
+                                           sidesNow.has("bottom"), sidesNow.has("top"), cutCenter]])
           .slice(-C.TRAJECTORY_HISTORY_LEN);
       }
       const win = regressionWindow(trajHistory, now);
@@ -474,7 +481,7 @@ export class HazardDetector {
       // 議會二：與尺度無關的落點取代畫面像素外推（實驗開關 LANDING_SCALE_INVARIANT）
       const siLanding = C.LANDING_SCALE_INVARIANT && prev && !occludedByFront
         ? scaleInvariantLanding(trajHistory.filter(p => now - p[0] <= Math.max(C.SI_WINDOW_SEC, C.TRAJECTORY_WINDOW_SEC)), motion.offsetX - pathCenterX, det.rawLabel, ttc, prev.siHit) : null;
-      if (siLanding && ttcSource !== "ground") inCollisionZone = siLanding.hit;
+      if (siLanding && (ttcSource !== "ground" || (C.SI_VETOES_GROUND && !siLanding.hit))) inCollisionZone = siLanding.hit;
       // 實驗三（消融）ABLATE_LANDING：不看預測落點，只要在靠近（TTC 有限）就算在路徑上
       if (C.ABLATE_LANDING) inCollisionZone = Number.isFinite(ttc);
       const prevTtc = prev ? prev.ttcSec : Infinity;
@@ -495,10 +502,13 @@ export class HazardDetector {
       let heldTtc, holdCount;
       // 這一幀真的量得到（真的偵測、沒被擋、框完全沒被畫面切到、完整的框高樣本夠），而且框高說「沒有在靠近」：
       // 暫留的倒數不能繼續。量不到（框被切、從側邊進來、被擋）的情況照舊暫留，那才是暫留要處理的
-      const fullSamples = win.filter(p => !p[6] && !p[7] && !p[8]);
-      const contradicted = C.TTC_HOLD_RELEASE_ON_CONTRADICTION && !isPredicted && !occludedByFront && !sidesForTtc.size
-        && fullSamples.length >= C.TRAJECTORY_MIN_FRAMES
-        && loomingRate(fullSamples.map(p => p[0]), fullSamples.map(p => p[3])) < C.TTC_HOLD_CONTRADICT_RATIO / Math.max(countdown, 0.1);
+      // 腳出畫面（只切到下緣）但頭看得到：改用頭頂到地平線的距離當尺度（停在面前的人常常是這樣）
+      const onlyBottom = sidesForTtc.size === 1 && sidesForTtc.has("bottom");
+      const scaleSamples = !sidesForTtc.size ? win.filter(p => !p[6] && !p[7] && !p[8]).map(p => [p[0], p[3]])
+        : onlyBottom ? win.filter(p => !p[6] && !p[8] && p[5] >= C.TOP_SCALE_MIN_PX).map(p => [p[0], p[5]]) : [];
+      const contradicted = C.TTC_HOLD_RELEASE_ON_CONTRADICTION && !isPredicted && !occludedByFront
+        && scaleSamples.length >= C.TRAJECTORY_MIN_FRAMES
+        && loomingRate(scaleSamples.map(p => p[0]), scaleSamples.map(p => p[1])) < C.TTC_HOLD_CONTRADICT_RATIO / Math.max(countdown, 0.1);
       if (measured) [heldTtc, holdCount] = [ttc, 0];
       else if (Number.isFinite(countdown) && ((prevHold < C.TTC_HOLD_FRAMES && !contradicted) || clippedHold || groundHold)) [heldTtc, holdCount] = [countdown, prevHold + 1];
       else [heldTtc, holdCount] = [Infinity, 0];

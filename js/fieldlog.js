@@ -3,6 +3,7 @@
 const KEY = "hic-fieldlog";
 const MAX_EVENTS = 5000;          // 約 1 MB 以內；超過時丟掉最舊的
 const MARK_WINDOW_MS = 15000;     // 「誤報」標記到最近 15 秒內的那一句警報
+const RETENTION_MS = 30 * 86400000;   // 威脅模型 R07：紀錄裡有帶時間的行走軌跡，超過 30 天自動刪掉（要留的請先匯出 CSV）
 
 const fixed = (x, d = 1) => (Number.isFinite(x) ? +x.toFixed(d) : null);
 
@@ -12,6 +13,8 @@ export class FieldLog {
     this.session = null;
     try { this.events = JSON.parse(storage?.getItem(KEY) || "[]"); } catch (e) { this.events = []; }
     if (!Array.isArray(this.events)) this.events = [];
+    const keepFrom = Date.now() - RETENTION_MS;
+    if (this.events.some(e => !(e.t >= keepFrom))) { this.events = this.events.filter(e => e.t >= keepFrom); this.save(); }
   }
 
   save() {

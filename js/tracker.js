@@ -53,9 +53,13 @@ export class ByteTracker {
     const low = dets.filter(d => d.score < highThresh && d.score >= C.TRACK_LOW_CONF);
 
     // 用速度推算每條軌跡現在的位置（物體自己的速度＋鏡頭轉動）
+    const useOffset = C.TRACK_GMC_OFFSET && Number.isFinite(camera.offsetX) && Number.isFinite(camera.offsetY);
+    // 鏡頭從上次看到這條軌跡到現在，實際讓畫面移動了多少
+    const camShift = t => (useOffset && Number.isFinite(t.camX)
+      ? [camera.offsetX - t.camX, camera.offsetY - t.camY] : [camera.vx * (now - t.time), camera.vy * (now - t.time)]);
     for (const t of this.tracks) {
-      const dt = Math.max(0, now - t.time);
-      t.predicted = shiftBox(t.box, (t.vx + camera.vx) * dt, (t.vy + camera.vy) * dt);
+      const dt = Math.max(0, now - t.time), [sx, sy] = camShift(t);
+      t.predicted = shiftBox(t.box, t.vx * dt + sx, t.vy * dt + sy);
     }
     const iouCost = (t, d) => 1 - computeIou(t.predicted, d.box);
     const fusedCost = (t, d) => 1 - computeIou(t.predicted, d.box) * d.score;
@@ -71,11 +75,11 @@ export class ByteTracker {
         // 速度存「扣掉鏡頭轉動」之後的值，推算時再加回當下的鏡頭轉動
         const cx = (d.box[0] + d.box[2]) / 2 - (t.box[0] + t.box[2]) / 2;
         const cy = (d.box[1] + d.box[3]) / 2 - (t.box[1] + t.box[3]) / 2;
-        const a = t.hits > 1 ? 0.5 : 1;
-        t.vx = (1 - a) * t.vx + a * (cx / dt - camera.vx);
-        t.vy = (1 - a) * t.vy + a * (cy / dt - camera.vy);
+        const a = t.hits > 1 ? 0.5 : 1, [sx, sy] = camShift(t);
+        t.vx = (1 - a) * t.vx + a * (cx - sx) / dt;
+        t.vy = (1 - a) * t.vy + a * (cy - sy) / dt;
       }
-      Object.assign(t, { box: d.box, time: now, lastFrame: this.frameId, lost: false, rawLabel: d.rawLabel });
+      Object.assign(t, { box: d.box, time: now, lastFrame: this.frameId, lost: false, rawLabel: d.rawLabel, camX: camera.offsetX, camY: camera.offsetY });
       t.hits++;
       output.push({ id: t.id, det: d });
     };
@@ -102,7 +106,7 @@ export class ByteTracker {
     // 剩下的高信心框建立新軌跡（第一次偵測時直接確認）
     for (const d of third.restDets) {
       if (d.score < (C.CLASS_CONF_THRESHOLDS[d.rawLabel] ?? C.TRACK_NEW_CONF)) continue;
-      const t = { id: this.nextId++, box: d.box, vx: 0, vy: 0, time: now, lastFrame: this.frameId,
+      const t = { id: this.nextId++, box: d.box, vx: 0, vy: 0, time: now, lastFrame: this.frameId, camX: camera.offsetX, camY: camera.offsetY,
                   hits: 1, lost: false, confirmed: d.score >= C.TRACK_INSTANT_CONF, rawLabel: d.rawLabel };
       this.tracks.push(t);
       if (t.confirmed) output.push({ id: t.id, det: d });

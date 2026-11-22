@@ -974,16 +974,25 @@ test("exitingFrame：內側邊往外移才算走出畫面；框變大（內側�
   assert(!A.exitingFrame(mk([600, 590, 580, 570, 560], 640), "right", 0.4), "框往中間長（斜向來人）不算");
 });
 test("壓力雜訊錯身 0.9 m：不顯著的 x/h 斜率往 0 收，外推不再亂跳進半徑", async () => {
-  const { SCENARIOS, NOISE, runOnce } = await import("./sim.js");
+  const { SCENARIOS, NOISE, STRESS_NOISE, runOnce } = await import("./sim.js");
   const pass = SCENARIOS.find(s => s.name === "錯身而過 0.9 m");
   const [savedZ, savedNoise] = [C.SI_SLOPE_SHRINK_Z, { ...NOISE }];
   try {
-    Object.assign(NOISE, { edgePx: 3, edgeRatio: 0.04, dropout: 0.1, glitch: 0.05, pitchDeg: 5 });
+    Object.assign(NOISE, STRESS_NOISE);
     C.SI_SLOPE_SHRINK_Z = 0;
     assert((await runOnce(pass, 7, 26007)).first.DANGER != null, "（對照）不收斜率時會誤報");
     C.SI_SLOPE_SHRINK_Z = 1.5;
     assert((await runOnce(pass, 7, 26007)).first.DANGER == null, "收斜率後不該誤報");
   } finally { C.SI_SLOPE_SHRINK_Z = savedZ; Object.assign(NOISE, savedNoise); }
+});
+test("模擬實驗：消融與排列組合的每個開關都存在，而且真的改到預設值", async () => {
+  // 打錯字或設定改名時 evaluate 只會多塞一個沒人讀的值，那一列會悄悄跟「完整」一樣
+  const { ABLATIONS, FACTORS } = await import("./sim.js");
+  for (const [name, set] of [...ABLATIONS, ...FACTORS.flatMap(([, levels]) => levels)])
+    for (const key of Object.keys(set)) assert(key in C, `「${name}」的開關 ${key} 不在設定裡`);
+  // 消融每一列（基準除外）都要真的關掉東西；排列組合有些水準本來就是預設值（例如「相對門檻」）
+  for (const [name, set] of ABLATIONS.slice(1))
+    assert(Object.entries(set).some(([k, v]) => C[k] !== v), `「${name}」跟預設一樣，等於沒關`);
 });
 test("shrinkSlope：雜訊裡的小斜率收到 0，明顯的斜率幾乎不動", () => {
   const noise = [0.05, -0.04, 0.03, -0.05, 0.04, -0.03, 0.05, -0.04];

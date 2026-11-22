@@ -9,6 +9,8 @@ import { HazardDetector } from "../js/detector.js";
 
 const W = 640, H = 480, F = focalPx(W, H);
 export const NOISE = { edgePx: 1.5, edgeRatio: 0.02, dropout: 0.05, glitch: 0.02, pitchDeg: 2.5, yawDeg: 3, stepHz: 1.8 };
+// 「加倍雜訊」（壓力測試）：報告的壓力數據和回歸測試都用這一組，只在這裡改
+export const STRESS_NOISE = { edgePx: 3, edgeRatio: 0.04, dropout: 0.1, glitch: 0.05, pitchDeg: 5 };
 
 // 物體：類別、真實高、寬（公尺）。小孩用 person 類別但只有 1.1 m 高（偵測器以為是 1.7 m）
 const KINDS = {
@@ -179,3 +181,23 @@ export function combinations() {
   }
   return out;
 }
+
+// 消融（一次拿掉一個）：完整版當基準，每列只關掉一個模組，看少了它變差多少。
+// 每個模組都已經有自己的開關；這裡只是把「關掉它」的設定列在一起（tests/ablation.mjs 會跑這張表）
+export const ABLATIONS = [
+  ["完整（目前預設）", {}],
+  ["TTC 改回固定 15 px/s 門檻", { TTC_FLOOR_NORMALIZED: false }],
+  ["拿掉 x/h 落點（改回畫面像素外推）", { LANDING_SCALE_INVARIANT: false }],
+  ["拿掉側邊切框推回中心", { SI_SIDE_CUT_CORRECT: false }],
+  ["拿掉 x/h 否決腳底向量", { SI_VETOES_GROUND: false }],
+  ["拿掉走出畫面判斷", { SI_EXIT_VETO: false }],
+  ["拿掉斜率收縮", { SI_SLOPE_SHRINK_Z: 0 }],
+  ["拿掉暫留遇矛盾解除", { TTC_HOLD_RELEASE_ON_CONTRADICTION: false }],
+  ["拿掉新軌跡只算實測證據", { ZONE_HITS_MEASURED_ONLY: false }],
+  ["拿掉追蹤用累積位移扣手機轉動", { TRACK_GMC_OFFSET: false }],
+  ["拿掉腳底向量", { GROUND_VECTOR_ENABLED: false }],
+  ["拿掉確認等待", { ZONE_CONFIRM_OFF: true }],
+  ["拿掉全域運動補償", { ABLATE_GMC: true }],
+  ["ByteTrack 換成貪婪配對", { ABLATE_TRACKER: true }],
+  ["拿掉預測落點（只要靠近就算）", { ABLATE_LANDING: true }],
+];

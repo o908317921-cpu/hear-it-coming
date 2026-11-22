@@ -4,7 +4,7 @@ import {
   classifyApproach, classifyGrowth, classifyProximity, collisionProbability, combinedRiskPct, computeIou,
   depthDistanceM, distanceEstimates, effectiveOccupancy, estimatePersonDistanceCm, findDepthHazards, median,
   groundApproach, groundPoint, groundPointByHeight, groundPlaneDistanceM, groundReferenceDistanceM, lateralRate, lateralToSpeedPct, hitRadiusM, linearSlope, loomingDhDt, loomingRate, predictCollision,
-  regressionWindow, relativeVelocity, scaleInvariantLanding, trajectoryOnCourse, truncationSides,
+  exitingFrame, regressionWindow, relativeVelocity, scaleInvariantLanding, trajectoryOnCourse, truncationSides,
 } from "./analysis.js";
 import { maskElongation } from "./yolo.js";
 import { ByteTracker } from "./tracker.js";
@@ -481,6 +481,11 @@ export class HazardDetector {
       // 議會二：與尺度無關的落點取代畫面像素外推（實驗開關 LANDING_SCALE_INVARIANT）
       const siLanding = C.LANDING_SCALE_INVARIANT && prev && !occludedByFront
         ? scaleInvariantLanding(trajHistory.filter(p => now - p[0] <= Math.max(C.SI_WINDOW_SEC, C.TRAJECTORY_WINDOW_SEC)), motion.offsetX - pathCenterX, det.rawLabel, ttc, prev.siHit) : null;
+      if (C.SI_EXIT_VETO && siLanding?.hit && !prev.siHit) {
+        const sides = truncationSides(det.box, w, h);
+        const side = sides.has("right") && !sides.has("left") ? "right" : sides.has("left") && !sides.has("right") ? "left" : null;
+        if (side && exitingFrame(trajHistory, side, now)) siLanding.hit = false;
+      }
       if (siLanding && (ttcSource !== "ground" || (C.SI_VETOES_GROUND && !siLanding.hit))) inCollisionZone = siLanding.hit;
       // 實驗三（消融）ABLATE_LANDING：不看預測落點，只要在靠近（TTC 有限）就算在路徑上
       if (C.ABLATE_LANDING) inCollisionZone = Number.isFinite(ttc);

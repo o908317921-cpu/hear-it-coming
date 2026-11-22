@@ -956,6 +956,23 @@ test("錯身 0.9 m：x/h 說會錯開時，腳底向量不能把它推翻成會�
     assert((await runOnce(pass, 7, 32007)).first.DANGER == null, "x/h 否決後不該誤報");
   } finally { C.SI_VETOES_GROUND = saved; }
 });
+test("路邊站著的人 1.3 m：框貼著右邊而且正往外移（走出畫面），不能新判會撞上", async () => {
+  // tests/sim.js 固定亂數重現：經過時人從右下角走出畫面，推回的中心被切短的高度拉向中間，x/h 一幀跳進半徑
+  const { SCENARIOS, runOnce } = await import("./sim.js");
+  const road = SCENARIOS.find(s => s.name === "路邊站著的人 1.3 m");
+  const saved = C.SI_EXIT_VETO;
+  try {
+    C.SI_EXIT_VETO = false;
+    assert((await runOnce(road, 10, 22010)).first.DANGER != null, "（對照）沒有走出畫面的判斷時會誤報");
+    C.SI_EXIT_VETO = true;
+    assert((await runOnce(road, 10, 22010)).first.DANGER == null, "走出畫面的人不該誤報");
+  } finally { C.SI_EXIT_VETO = saved; }
+});
+test("exitingFrame：內側邊往外移才算走出畫面；框變大（內側邊往中間長）不算", () => {
+  const mk = (x1s, x2) => x1s.map((x1, i) => [i * 0.1, (x1 + x2) / 2, 0, 300, x2 - x1]);
+  assert(A.exitingFrame(mk([560, 570, 580, 590, 600], 640), "right", 0.4), "內側邊每秒往右 100 px");
+  assert(!A.exitingFrame(mk([600, 590, 580, 570, 560], 640), "right", 0.4), "框往中間長（斜向來人）不算");
+});
 test("錯身 0.9 m：落點的橫向擬合用較長的時間窗，外推不再亂跳進半徑", async () => {
   // tests/sim.js 固定亂數重現：1 秒時間窗外推的落點在 0.5～1.2 m 間跳，半徑 0.6 m，會誤報；1.5 秒就穩了
   const { SCENARIOS, runOnce } = await import("./sim.js");

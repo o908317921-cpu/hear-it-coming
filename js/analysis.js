@@ -551,3 +551,15 @@ export function motionArrowEndpoint(ox, oy, vx, vy, fallbackPoint, length = C.MO
   }
   return [Math.trunc(ox + vx / speed * length), Math.trunc(oy + vy / speed * length)];
 }
+
+// 框貼著 side（"left"/"right"）邊時，沒被切的內側邊是不是正往畫面外移（Theil–Sen 斜率，像素/秒）。
+// 樣本格式同 trajHistory：[t, 中心x(已扣手機轉動), …, 高, 寬, …]
+export function exitingFrame(win, side, now) {
+  const pts = win.filter(p => now - p[0] <= C.SI_EXIT_WINDOW_SEC)
+    .map(p => [p[0], side === "right" ? p[1] - p[4] / 2 : -(p[1] + p[4] / 2)]);   // 往外為正
+  if (pts.length < 3) return false;
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++)
+    if (pts[j][0] > pts[i][0]) slopes.push((pts[j][1] - pts[i][1]) / (pts[j][0] - pts[i][0]));
+  return slopes.length > 0 && median(slopes) > C.SI_EXIT_EDGE_PX_S;
+}

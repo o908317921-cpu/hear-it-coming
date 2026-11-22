@@ -167,7 +167,7 @@ export async function evaluate(settings, { fpsList = [4, 10], seeds = [1, 2, 3],
 
 // 要比較的四個因子（每個都是設定開關，預設值＝現在的 App）
 export const FACTORS = [
-  ["TTC 估計", [["原本（15 px/s 門檻）", {}], ["相對門檻", { TTC_FLOOR_NORMALIZED: true }], ["信賴下界", { TTC_LOWER_BOUND: true }]]],
+  ["TTC 估計", [["原本（15 px/s 門檻）", { TTC_FLOOR_NORMALIZED: false }], ["相對門檻", { TTC_FLOOR_NORMALIZED: true }], ["信賴下界", { TTC_LOWER_BOUND: true }]]],
   ["腳底向量", [["完整", {}], ["只否決錯身", { GROUND_VETO_ONLY: true }], ["關閉", { GROUND_VECTOR_ENABLED: false }]]],
   ["預測落點", [["有", {}], ["沒有", { ABLATE_LANDING: true }]]],
   ["確認等待", [["有", {}], ["沒有", { ZONE_CONFIRM_OFF: true }]]],

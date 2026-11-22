@@ -973,12 +973,35 @@ test("exitingFrame：內側邊往外移才算走出畫面；框變大（內側�
   assert(A.exitingFrame(mk([560, 570, 580, 590, 600], 640), "right", 0.4), "內側邊每秒往右 100 px");
   assert(!A.exitingFrame(mk([600, 590, 580, 570, 560], 640), "right", 0.4), "框往中間長（斜向來人）不算");
 });
+test("壓力雜訊錯身 0.9 m：不顯著的 x/h 斜率往 0 收，外推不再亂跳進半徑", async () => {
+  const { SCENARIOS, NOISE, runOnce } = await import("./sim.js");
+  const pass = SCENARIOS.find(s => s.name === "錯身而過 0.9 m");
+  const [savedZ, savedNoise] = [C.SI_SLOPE_SHRINK_Z, { ...NOISE }];
+  try {
+    Object.assign(NOISE, { edgePx: 3, edgeRatio: 0.04, dropout: 0.1, glitch: 0.05, pitchDeg: 5 });
+    C.SI_SLOPE_SHRINK_Z = 0;
+    assert((await runOnce(pass, 7, 26007)).first.DANGER != null, "（對照）不收斜率時會誤報");
+    C.SI_SLOPE_SHRINK_Z = 1.5;
+    assert((await runOnce(pass, 7, 26007)).first.DANGER == null, "收斜率後不該誤報");
+  } finally { C.SI_SLOPE_SHRINK_Z = savedZ; Object.assign(NOISE, savedNoise); }
+});
+test("shrinkSlope：雜訊裡的小斜率收到 0，明顯的斜率幾乎不動", () => {
+  const noise = [0.05, -0.04, 0.03, -0.05, 0.04, -0.03, 0.05, -0.04];
+  const flat = noise.map((e, i) => [i * 0.1, 0.5 + e]);
+  assert(A.shrinkSlope(flat, 0.02, 0.5, 0.7, 1.5) === 0, "不顯著的斜率應收成 0");
+  const steep = noise.map((e, i) => [i * 0.1, 0.5 - 0.3 * i * 0.1 + e]);
+  const k = A.shrinkSlope(steep, -0.3, 0.5 - 0.3 * 0.7, 0.7, 1.5) / -0.3;
+  assert(k > 0.7 && k <= 1, `明顯的斜率不該被收太多（剩 ${k.toFixed(2)}）`);
+  assert(A.shrinkSlope(flat, 0.02, 0.5, 0.7, 0) === 0.02, "z = 0 時不收");
+  assert(A.shrinkSlope(flat.slice(0, 3), 0.02, 0.5, 0.2, 1.5) === 0.02, "只有 3 個點時判斷不了，照原樣用");
+});
 test("錯身 0.9 m：落點的橫向擬合用較長的時間窗，外推不再亂跳進半徑", async () => {
   // tests/sim.js 固定亂數重現：1 秒時間窗外推的落點在 0.5～1.2 m 間跳，半徑 0.6 m，會誤報；1.5 秒就穩了
   const { SCENARIOS, runOnce } = await import("./sim.js");
   const pass = SCENARIOS.find(s => s.name === "錯身而過 0.9 m");
-  const saved = C.SI_WINDOW_SEC;
+  const [saved, savedZ] = [C.SI_WINDOW_SEC, C.SI_SLOPE_SHRINK_Z];
   try {
+    C.SI_SLOPE_SHRINK_Z = 0;   // 只看時間窗本身的效果（收斜率也會壓掉這兩個誤報）
     for (const seed of [21010, 22010]) {
       C.SI_WINDOW_SEC = 1.0;
       assert((await runOnce(pass, 10, seed)).first.DANGER != null, `（對照）1 秒時間窗會誤報（種子 ${seed}）`);
@@ -986,7 +1009,7 @@ test("錯身 0.9 m：落點的橫向擬合用較長的時間窗，外推不再�
       const at = (await runOnce(pass, 10, seed)).first.DANGER;
       assert(at == null, `預設時間窗不該誤報，實際第 ${at?.toFixed(2)} 秒喊了（種子 ${seed}）`);
     }
-  } finally { C.SI_WINDOW_SEC = saved; }
+  } finally { C.SI_WINDOW_SEC = saved; C.SI_SLOPE_SHRINK_Z = savedZ; }
 });
 test("TTC 短暫中斷時「會撞上」也跟著暫留", async () => {
   const det = new HazardDetector(new FakeYolo(n => 1190 / (6 - 0.15 * Math.min(n, 13))), null);
@@ -1540,6 +1563,21 @@ test("斑馬線語音：確認後說一次；前方有高低差（樓梯）時�
 test("紅綠燈不進碰撞追蹤", () => eq(targetClassIds().get(COCO_NAMES.indexOf("traffic light")), "traffic light"));
 
 function memoryStorage() { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; }
+test("實測紀錄：不傳儲存空間時（app.js 的用法）用 localStorage，重新開啟網頁還讀得到", () => {
+  // 以前建構時讀的是參數而不是 localStorage：重開網頁讀到 0 筆，下一次開始就把舊紀錄蓋掉
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { value: memoryStorage(), configurable: true });
+  try {
+    const day1 = new FieldLog();
+    day1.start(); day1.alert("前方，危險", "危險"); day1.stop();
+    const day2 = new FieldLog();
+    eq(day2.events.length, 3);
+    day2.start();
+    eq(new FieldLog().events.length, 4);
+  } finally {
+    if (real) Object.defineProperty(globalThis, "localStorage", real); else delete globalThis.localStorage;
+  }
+});
 test("實測紀錄：誤報標記、漏報、摘要、CSV", () => {
   const store = memoryStorage(), log = new FieldLog(store);
   eq(log.mark("false"), "還沒開始偵測，沒有記錄");

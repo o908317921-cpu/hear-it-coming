@@ -264,9 +264,24 @@ export function scaleInvariantLanding(win, xShift, rawLabel, ttc, wasHit = false
   if (!slopes.length) return null;
   const slope = median(slopes), last = pts[pts.length - 1][0];
   const now = median(pts.map(([t, r]) => r + slope * (last - t)));
-  const xAtContactM = (now + slope * ttc) * scaleM;
+  const xAtContactM = (now + shrinkSlope(pts, slope, now, last) * ttc) * scaleM;
   const radius = hitRadiusM(ttc) * (wasHit ? C.HIT_RELEASE_SCALE : 1);
   return { xAtContactM, hit: Math.abs(xAtContactM) <= radius };
+}
+
+// 斜率的標準誤用殘差的 MAD 估（穩健），再把不顯著的斜率往 0 收
+export function shrinkSlope(pts, slope, level, last, z = C.SI_SLOPE_SHRINK_Z) {
+  if (!(z > 0) || slope === 0) return slope;
+  // 3 個點時 MAD 幾乎一定是 0，判斷不了顯不顯著：照原樣用。當成不顯著收成 0 反而更糟
+  // （模擬：橫越中的人斜率被收掉，會以為他一直站在正前方，前方 2 m 橫越 48→43、壓力下 46→36）
+  if (pts.length < 4) return slope;
+  const res = pts.map(([t, x]) => x - (level + slope * (t - last)));
+  const mr = median(res), sigma = 1.4826 * median(res.map(r => Math.abs(r - mr)));
+  const tm = pts.reduce((s, [t]) => s + t, 0) / pts.length;
+  const sxx = pts.reduce((s, [t]) => s + (t - tm) ** 2, 0);
+  if (!(sxx > 0)) return 0;
+  const se = sigma / Math.sqrt(sxx);
+  return slope * Math.max(0, 1 - (z * se) ** 2 / slope ** 2);
 }
 
 // 判定「會撞上」的半徑（公尺）：愈久以後的事愈不準，半徑愈小

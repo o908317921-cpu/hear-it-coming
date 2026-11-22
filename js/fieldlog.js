@@ -11,7 +11,7 @@ export class FieldLog {
   constructor(storage) {
     try { this.storage = storage ?? globalThis.localStorage; } catch (e) { this.storage = null; }   // 無痕模式可能直接丟錯
     this.session = null;
-    try { this.events = JSON.parse(storage?.getItem(KEY) || "[]"); } catch (e) { this.events = []; }
+    try { this.events = JSON.parse(this.storage?.getItem(KEY) || "[]"); } catch (e) { this.events = []; }
     if (!Array.isArray(this.events)) this.events = [];
     const keepFrom = Date.now() - RETENTION_MS;
     if (this.events.some(e => !(e.t >= keepFrom))) { this.events = this.events.filter(e => e.t >= keepFrom); this.save(); }

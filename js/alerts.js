@@ -220,7 +220,6 @@ export class AlertEngine {
     const onCourse = tracks.filter(tr => (tr.onCourse !== false || !C.TRAJECTORY_FIRST)
       && (tr.ageSec ?? Infinity) >= C.ALARM_MIN_TRACK_AGE_SEC);
     // 橫越：遠處的車不會撞到人，距離不明時寧可提醒。
-    // 靠近：面積變化率對遠處的小目標雜訊很大，要 TTC 也認為快到了才算，否則 6 秒外就會喊「很快」。
     // 朝使用者靠近的「很快」不另外報：那就是「注意／危險／停」，再多一種說法只會搶話（人多時也最容易亂報）
     const speedMatters = tr => tr.speedSource === "lateral"
       && (!Number.isFinite(tr.distanceM) || tr.distanceM <= C.SPEED_ALERT_MAX_M);

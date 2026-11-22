@@ -283,6 +283,9 @@ export const C = {
   // 框貼著左/右邊、而且沒被切的那一邊正往畫面外移（方位角一直往外變）：是要走出畫面的錯身，不是撞上。
   // 真的會撞上的斜向來人方位角幾乎不變，框只會變大、內側邊往中間長（模擬：路邊站著的人 1.3 m 的誤報多半是這樣）
   SI_EXIT_VETO: true,
+  // x/h 的斜率估不準時往 0 收（正部 James–Stein）：斜率乘上 max(0, 1 − (z·標準誤)²/斜率²)。0 = 不收。
+  // 模擬：壓力雜訊下錯身的落點誤差主要來自斜率×TTC（±0.34 m），目前位置本身只有 ±0.11 m
+  SI_SLOPE_SHRINK_Z: 1.5,
   SI_EXIT_WINDOW_SEC: 0.6,
   SI_EXIT_EDGE_PX_S: 15,           // 內側邊往外移超過這個速度（像素/秒，已扣掉手機轉動）才算在走出畫面
   // x/h 落點算得出來而且說「會錯開」時，腳底向量不能把它推翻成「會撞上」（腳底向量的錯身距離受手機俯仰影響大）。
@@ -330,7 +333,6 @@ export const C = {
   CLEAR_MIN_ALARM_SEC: 1.0,       // 危險至少持續這麼久，結束時才念「警報解除」；一閃而過的不用特地解除
   BEEP_DOWN_HOLD_SEC: 0.6,        // 警示音變急馬上變，要變緩或停下來得先穩定這麼久，判定在邊緣時才不會快慢快慢亂跳
   ALARM_VOICE_GLOBAL_GAP_SEC: 1.5, // 不同類語音之間至少隔多久，誤報與嘮叨都會讓使用者不再信任警示
-  SPEED_ALERT_MAX_TTC_SEC: 3.0,   // 朝使用者靠近的物體要 TTC 也認為快到了才報：遠處小目標的面積雜訊很大
   TOP_SCALE_MIN_PX: 30.0,         // 頭頂高於地平線至少這麼多像素，才用它當截斷時的尺度
   SPEED_ALERT_MAX_M: 8.0,         // 橫越的物體距離超過這個值不報（遠處橫越的車不會撞到人）
   SPEECH_RATE: 1.1,               // 瀏覽器語音速度（1 為正常）
@@ -447,7 +449,6 @@ export const C = {
 
   DIRECTION_TEXT: { left: "左前方", center: "正前方", right: "右前方" },
   PROXIMITY_TEXT: { GREEN: "較遠", ORANGE: "偏近", RED: "過近" },
-  APPROACH_TEXT: { approaching: "靠近", receding: "遠離", stable: "穩定" },
 };
 
 // YOLO（COCO）類別，模型輸出的第幾個分數對應哪個類別

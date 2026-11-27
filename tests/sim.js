@@ -200,4 +200,7 @@ export const ABLATIONS = [
   ["拿掉全域運動補償", { ABLATE_GMC: true }],
   ["ByteTrack 換成貪婪配對", { ABLATE_TRACKER: true }],
   ["拿掉預測落點（只要靠近就算）", { ABLATE_LANDING: true }],
+  ["拿掉頭進畫面前的樣本修剪", { LOOMING_ENTRY_TRIM: false }],
+  ["拿掉腳出畫面倒數保留較短 TTC", { GROUND_HOLD_KEEPS_SHORTER: false }],
+  ["拿掉只切側邊時照算框高", { SIDE_CUT_LOOMING: false }],
 ];

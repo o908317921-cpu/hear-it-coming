@@ -227,6 +227,13 @@ export function loomingDhDt(win, height, sides, reachesPath = false, frameHeight
       if (win.length < C.TRAJECTORY_MIN_FRAMES) return 0;
     }
   }
+  // 頭還在畫面外時記下的樣本（p[10]：側邊被切、看得到的寬度不到全身一半）：框上緣是肩膀，
+  // 頭一進來「頭頂到地平線」就跳一大段，被當成快速靠近（實拍 IMG_4571：一幀 TTC 0.45 秒、直接喊停）
+  if (C.LOOMING_ENTRY_TRIM) {
+    // 只丟「頭進來之前」那段：現在頭還在外面就照舊算（貼著畫面邊撞上來的人，不能因此一直算不出 TTC）
+    const k = win.findLastIndex(p => p[10]);
+    if (k >= 0 && k < win.length - 1) { win = win.slice(k + 1); if (win.length < C.TRAJECTORY_MIN_FRAMES) return 0; }
+  }
   const ts = win.map(p => p[0]), z = C.TTC_LOWER_BOUND ? C.TTC_LB_Z : 0;
   let rate = loomingRate(ts, win.map(p => p[3]), z);
   const widthRate = !left && !right ? loomingRate(ts, win.map(p => p[4]), z) : null;

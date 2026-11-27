@@ -474,6 +474,29 @@ test("剛從側邊進來的物體不算 TTC，框底差幾像素也算截斷", (
   assert(A.computeTtc(380, A.loomingDhDt(entering, 380, new Set())) < 3.5);
   eq(A.loomingDhDt(entering.map(p => [...p.slice(0, 6), true]), 380, new Set()), 0);
 });
+test("實拍 IMG_4571：頭比身體晚進畫面，進場那段的樣本不能拿來算 TTC（LOOMING_ENTRY_TRIM）", () => {
+  // 斜向來人從右邊進來，4.633 秒腳也出了畫面（右＋下被切）那一幀的實際時間窗：[秒, 框高, 頭頂離地平線]。
+  // 4.35 秒前頭還在畫面外，框上緣是肩膀；頭進來時頭頂到地平線從 78 跳到 145
+  const rows = [[3.867, 291, 66], [3.9, 292, 68], [3.933, 318, 68], [3.967, 335, 69], [4, 344, 72], [4.033, 349, 72], [4.067, 354, 74],
+    [4.1, 362, 77], [4.133, 365, 75], [4.167, 368, 75], [4.2, 372, 78], [4.233, 380, 85], [4.267, 389, 92], [4.3, 393, 97],
+    [4.333, 411, 114], [4.367, 416, 119], [4.4, 431, 134], [4.433, 431, 136], [4.467, 432, 142], [4.5, 440, 145],
+    [4.533, 446, 148], [4.567, 451, 147], [4.6, 460, 147], [4.633, 473, 148]];
+  // 第 11 欄：頭還在畫面外（影片截圖約 4.45 秒頭才進來）
+  const win = rows.map(([t, h, p5], i) => [t, 300, 600, h, 100, p5, true, i === rows.length - 1, false, null, t < 4.45]);
+  const sides = new Set(["bottom", "right"]), saved = C.LOOMING_ENTRY_TRIM;
+  // 對照：正面走來、只切下緣（沒有進場樣本），開不開都一樣算得出 TTC
+  const frontal = [...Array(8).keys()].map(i => { const z = 3 - 1.5 * i * 0.1; return [i * 0.1, 320, 480, 400, 150 / z, 200 / z, false, true, false, null, false]; });
+  const truth = (3 - 1.5 * 0.7) / 1.5;
+  try {
+    C.LOOMING_ENTRY_TRIM = false;
+    assert(A.computeTtc(473, A.loomingDhDt(win, 473, sides, true, 640)) < 0.6, "（對照）不修剪時重現實拍的 0.45 秒");
+    close(A.computeTtc(400, A.loomingDhDt(frontal, 400, new Set(["bottom"]))), truth, 1e-6);
+    C.LOOMING_ENTRY_TRIM = true;
+    // 頭進畫面之後頭頂到地平線幾乎不變（145–148）：不是快速靠近
+    assert(A.computeTtc(473, A.loomingDhDt(win, 473, sides, true, 640)) > 3, "修剪後不該再算出緊急的 TTC");
+    close(A.computeTtc(400, A.loomingDhDt(frontal, 400, new Set(["bottom"]))), truth, 1e-6);
+  } finally { C.LOOMING_ENTRY_TRIM = saved; }
+});
 test("手機直拿與橫拿的焦距相同", () => {
   close(A.pinholeDistanceM("person", 238, 480, 640), A.pinholeDistanceM("person", 238, 640, 480));
   eq(A.focalPx(480, 640), C.CAMERA_FOCAL_LENGTH_PX);

@@ -403,15 +403,17 @@ export class HazardDetector {
         skipSample = jumped && trajHistory.length > 0;
         const sidesNow = truncationSides(det.box, w, h);
         // 只被左或右邊切到：用沒被切的那一邊推回中心（第 10 欄，給與尺度無關的落點用）
-        let cutCenter = null;
+        let cutCenter = null, headOut = false;
         if (sidesNow.has("left") !== sidesNow.has("right")) {
           const full = trajHistory.filter(p => !p[6] && !p[7] && !p[8]);
           const aspect = full.length ? median(full.map(p => p[4] / p[3])) : C.SI_DEFAULT_ASPECT;
           cutCenter = (sidesNow.has("left") ? x2 - aspect * height / 2 : x1 + aspect * height / 2) - motion.offsetX;
+          // 第 11 欄：頭在身體寬度的正中間，看得到的寬度不到全身一半＝頭還在畫面外，框上緣是肩膀（給 LOOMING_ENTRY_TRIM 用）
+          headOut = x2 - x1 < aspect * height / 2;
         }
         if (!skipSample) trajHistory = trajHistory.concat([[now, footX - motion.offsetX, footY - motion.offsetY, height, x2 - x1,
                                            h / 2 + motion.offsetY - y1, sidesNow.has("left") || sidesNow.has("right"),
-                                           sidesNow.has("bottom"), sidesNow.has("top"), cutCenter]])
+                                           sidesNow.has("bottom"), sidesNow.has("top"), cutCenter, headOut]])
           .slice(-C.TRAJECTORY_HISTORY_LEN);
       }
       const win = regressionWindow(trajHistory, now);
@@ -537,9 +539,18 @@ export class HazardDetector {
       const far = height < C.ZONE_FAR_HEIGHT_RATIO * h;
       const needSec = far ? C.ZONE_CONFIRM_SEC_FAR : heldTtc > C.TTC_URGENT_SEC ? C.ZONE_CONFIRM_SEC : C.ZONE_CONFIRM_SEC_URGENT;
       // 議會二：腳出畫面只代表「很近」，不代表「會撞上」：開了與尺度無關的落點時，要它也判定會撞上才能不等
-      const zoneLongEnough = C.ZONE_CONFIRM_OFF || !far && heldTtc <= C.TTC_URGENT_SEC && sidesForTtc.has("bottom")
+      // 下緣＋側邊都被切（從角落進來）不代表就在正前方：URGENT_SHORTCUT_BOTTOM_ONLY 時只有「只切下緣」能不等
+      const footOut = C.URGENT_SHORTCUT_BOTTOM_ONLY ? onlyBottom : sidesForTtc.has("bottom");
+      const zoneLongEnough = C.ZONE_CONFIRM_OFF || !far && heldTtc <= C.TTC_URGENT_SEC && footOut
         && (!C.LANDING_SCALE_INVARIANT || !!siLanding?.hit) ? zoneHits >= 1
         : zoneHits >= C.ZONE_CONFIRM_MIN_HITS && zoneSince != null && now - zoneSince >= needSec - 1e-6;
+      if (C.DEBUG_TTC_TRACE) (globalThis.__ttcTrace ??= []).push({
+        t: now, id: trackId, box: det.box.map(Math.round), sides: [...sidesForTtc].join("+"), height: Math.round(height),
+        win: win.map(p => [+p[0].toFixed(3), Math.round(p[3]), Math.round(p[5]), +p[6], +p[7], +p[8]]),
+        dhDt: +dhDt.toFixed(2), ttc: +(+ttc).toFixed(3), heldTtc: +(+heldTtc).toFixed(3), measured, ttcSource,
+        inZone: inCollisionZone, siHit: !!siLanding?.hit, zoneHits, shortcut: !C.ZONE_CONFIRM_OFF && !far && heldTtc <= C.TTC_URGENT_SEC
+          && footOut && (!C.LANDING_SCALE_INVARIANT || !!siLanding?.hit),
+      });
       const zoneConfirmed = inCollisionZone && (trackedLongEnough || (prev && prev.zoneConfirmed))
         && (!(heldTtc <= C.TTC_DANGER_SEC) || zoneLongEnough || (prev && prev.zoneConfirmed && zoneHits > 0));
       const [relativeVx, relativeVy] = relativeVelocity(vx, vy);

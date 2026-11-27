@@ -466,7 +466,8 @@ test("鏡頭上仰時最下緣露出的一顆頭不算靠近，腳被切掉的�
   assert(A.loomingDhDt(narrowing, 300, new Set(["bottom"]), false, 480) > 0);
 });
 test("剛從側邊進來的物體不算 TTC，框底差幾像素也算截斷", () => {
-  const win = [...Array(8).keys()].map(i => [i * 0.1, 320, 480, 100 + i * 20, 80, 60, true]);
+  // 剛進來、頭還在畫面外（第 11 欄）：看得到的部分越來越多，不算靠近
+  const win = [...Array(8).keys()].map(i => [i * 0.1, 320, 480, 100 + i * 20, 80, 60, true, false, false, null, true]);
   eq(A.loomingDhDt(win, 240, new Set(["left"])), 0);
   eq(A.loomingDhDt(win, 240, new Set(["right"])), 0);
   eq([...A.truncationSides([0, 100, 200, 472], 640, 480)].sort(), ["bottom", "left"]);
@@ -557,7 +558,15 @@ test("橫跨畫面的大車仍算 TTC，剛從側邊進來的不算", () => {
   const win = [...Array(8).keys()].map(i => [i * 0.1, 320, 300, 1000 / (5 - 0.05 * i), 700, 100, true]);
   assert(A.loomingDhDt(win, 200, new Set(["left", "right"])) > 0);
   assert(A.loomingDhDt(win, 200, new Set(["left"]), true) > 0);
-  eq(A.loomingDhDt(win, 200, new Set(["left"])), 0);
+  // 還沒到路徑：頭還在畫面外（第 11 欄）的不算；頭看得到的照算（SIDE_CUT_LOOMING：斜向來人方位角不變，一路貼著邊長大）
+  eq(A.loomingDhDt(win.map(p => [...p, false, false, null, true]), 200, new Set(["left"])), 0);
+  const saved = C.SIDE_CUT_LOOMING;
+  try {
+    C.SIDE_CUT_LOOMING = false;
+    eq(A.loomingDhDt(win, 200, new Set(["left"])), 0, "（對照）關掉時貼邊的一律不算");
+    C.SIDE_CUT_LOOMING = true;
+    assert(A.loomingDhDt(win, 200, new Set(["left"])) > 0, "頭看得到、貼著邊長大的要算");
+  } finally { C.SIDE_CUT_LOOMING = saved; }
 });
 test("深度圖門檻用校準過的比值", () => {
   const w = 64, h = 48, data = new Float32Array(w * h);

@@ -551,7 +551,7 @@ export class HazardDetector {
         win: win.map(p => [+p[0].toFixed(3), Math.round(p[3]), Math.round(p[5]), +p[6], +p[7], +p[8]]),
         dhDt: +dhDt.toFixed(2), ttc: +(+ttc).toFixed(3), heldTtc: +(+heldTtc).toFixed(3), measured, ttcSource,
         countdown: +(+countdown).toFixed(3), groundHold: !!groundHold, groundTtc: ground ? +(+ground.ttc).toFixed(3) : null,
-        inZone: inCollisionZone, siHit: !!siLanding?.hit, zoneHits, shortcut: !C.ZONE_CONFIRM_OFF && !far && heldTtc <= C.TTC_URGENT_SEC
+        inZone: inCollisionZone, siHit: !!siLanding?.hit, siX: siLanding ? +siLanding.xAtContactM.toFixed(2) : null, zoneHits, shortcut: !C.ZONE_CONFIRM_OFF && !far && heldTtc <= C.TTC_URGENT_SEC
           && footOut && (!C.LANDING_SCALE_INVARIANT || !!siLanding?.hit),
       });
       const zoneConfirmed = inCollisionZone && (trackedLongEnough || (prev && prev.zoneConfirmed))

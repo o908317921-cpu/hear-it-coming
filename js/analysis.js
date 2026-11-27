@@ -221,7 +221,13 @@ export function loomingDhDt(win, height, sides, reachesPath = false, frameHeight
   const left = sides.has("left"), right = sides.has("right");
   if (!sides.has("top") && !sides.has("bottom")) {
     // 剛從畫面側邊進來、還沒到路徑：看得到的部分越來越多，框高不代表真的在靠近
-    if (left !== right && !reachesPath) return 0;
+    // SIDE_CUT_LOOMING：只切側邊時框高本身是完整的；會撞上的斜向來人方位角不變，正是一路貼著畫面邊長大。
+    // 不可靠的只有頭還在畫面外的樣本（p[10]），丟掉那些、用其餘的照算
+    if (left !== right && !reachesPath) {
+      if (!C.SIDE_CUT_LOOMING) return 0;
+      win = win.filter(p => !p[10]);
+      if (win.length < C.TRAJECTORY_MIN_FRAMES) return 0;
+    }
     if (!left && !right) {
       win = win.filter(p => !p[6]);   // 剛才進場時的殘缺框也不能算
       if (win.length < C.TRAJECTORY_MIN_FRAMES) return 0;

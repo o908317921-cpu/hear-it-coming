@@ -991,6 +991,23 @@ test("路邊站著的人 1.3 m：框貼著右邊而且正往外移（走出畫�
     assert((await runOnce(road, 10, 22010)).first.DANGER == null, "走出畫面的人不該誤報");
   } finally { C.SI_EXIT_VETO = saved; }
 });
+test("腳出畫面、腳底向量照最後的 TTC 倒數時，框高算出比較晚的 TTC 不能讓「停」掉下來（GROUND_HOLD_KEEPS_SHORTER）", async () => {
+  // 實拍 IMG_4571 7.70 秒：倒數 0.78 秒被框高的 2.84 秒取代。模擬固定亂數重現同樣的情況
+  const { SCENARIOS, runOnce } = await import("./sim.js");
+  const s = SCENARIOS.find(x => x.name === "路上站著的人");
+  const drops = (tr, tc) => tr.filter((b, i) => i && tr[i - 1].id === b.id && b.t < tc - 0.3
+    && tr[i - 1].ttcSource === "ground" && tr[i - 1].heldTtc <= C.TTC_URGENT_SEC && b.heldTtc > C.TTC_URGENT_SEC).length;
+  const saved = [C.GROUND_HOLD_KEEPS_SHORTER, C.DEBUG_TTC_TRACE];
+  try {
+    C.DEBUG_TTC_TRACE = true;
+    for (const on of [false, true]) {
+      C.GROUND_HOLD_KEEPS_SHORTER = on; globalThis.__ttcTrace = [];
+      const { tc } = await runOnce(s, 10, 23010);
+      const n = drops(globalThis.__ttcTrace, tc);
+      if (on) eq(n, 0); else assert(n > 0, "（對照）不保留倒數時「停」會掉下來");
+    }
+  } finally { [C.GROUND_HOLD_KEEPS_SHORTER, C.DEBUG_TTC_TRACE] = saved; globalThis.__ttcTrace = undefined; }
+});
 test("exitingFrame：內側邊往外移才算走出畫面；框變大（內側邊往中間長）不算", () => {
   const mk = (x1s, x2) => x1s.map((x1, i) => [i * 0.1, (x1 + x2) / 2, 0, 300, x2 - x1]);
   assert(A.exitingFrame(mk([560, 570, 580, 590, 600], 640), "right", 0.4), "內側邊每秒往右 100 px");

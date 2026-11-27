@@ -505,7 +505,9 @@ export class HazardDetector {
       const shrinking = dhDt <= -Math.max(C.MIN_DH_DT_FOR_TTC, C.RECEDING_MIN_RATE * height);
       const groundHold = ttcSource !== "ground" && prev && prev.ttcSource === "ground" && sidesForTtc.has("bottom")
         && !shrinking && now - prev.ttcMeasuredAt <= C.TTC_CLIPPED_HOLD_SEC;
-      const measured = Number.isFinite(ttc) && !(clippedHold && ttc > countdown) && !(groundHold && !inCollisionZone);
+      // GROUND_HOLD_KEEPS_SHORTER：框高說「會撞上但比較晚」也不能取代倒數（實拍 IMG_4571 7.70 秒：0.78 → 2.84，「停」掉回「注意」）
+      const measured = Number.isFinite(ttc) && !(clippedHold && ttc > countdown)
+        && !(groundHold && (!inCollisionZone || (C.GROUND_HOLD_KEEPS_SHORTER && ttc > countdown)));
       let heldTtc, holdCount;
       // 這一幀真的量得到（真的偵測、沒被擋、框完全沒被畫面切到、完整的框高樣本夠），而且框高說「沒有在靠近」：
       // 暫留的倒數不能繼續。量不到（框被切、從側邊進來、被擋）的情況照舊暫留，那才是暫留要處理的
@@ -548,6 +550,7 @@ export class HazardDetector {
         t: now, id: trackId, box: det.box.map(Math.round), sides: [...sidesForTtc].join("+"), height: Math.round(height),
         win: win.map(p => [+p[0].toFixed(3), Math.round(p[3]), Math.round(p[5]), +p[6], +p[7], +p[8]]),
         dhDt: +dhDt.toFixed(2), ttc: +(+ttc).toFixed(3), heldTtc: +(+heldTtc).toFixed(3), measured, ttcSource,
+        countdown: +(+countdown).toFixed(3), groundHold: !!groundHold, groundTtc: ground ? +(+ground.ttc).toFixed(3) : null,
         inZone: inCollisionZone, siHit: !!siLanding?.hit, zoneHits, shortcut: !C.ZONE_CONFIRM_OFF && !far && heldTtc <= C.TTC_URGENT_SEC
           && footOut && (!C.LANDING_SCALE_INVARIANT || !!siLanding?.hit),
       });

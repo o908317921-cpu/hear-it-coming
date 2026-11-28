@@ -255,19 +255,16 @@ function showWarnings() {
   // 深度模型卡住時不會有任何錯誤，結果只是一直沒回來
   if (depth && !depthSlowWarned && depth.busy && performance.now() - depth.busySince > 3 * C.DEPTH_MAX_AGE_SEC * 1000) {
     depthSlowWarned = true;
-    $("notice").textContent = "深度模型沒有回應，頭部高度障礙可能偵測不到。";
     audio.say("這支手機算得比較慢，頭上的障礙可能偵測不到", 0);
   }
   // 連續好幾次超過期限：結果用不到，等於沒有頭上障礙偵測，要讓使用者知道
   if (depth && !depthSlowWarned && depth.slowRuns >= 3) {
     depthSlowWarned = true;
-    $("notice").textContent = "這支手機算深度太慢，頭部高度障礙可能偵測不到。";
     audio.say("這支手機算得比較慢，頭上的障礙可能偵測不到", 0);
   }
   if (depth && depth.error && !shownWarnings.has(depth.error)) {
     shownWarnings.add(depth.error);
     console.warn(depth.error);
-    $("notice").textContent = depth.error;
     audio.say(C.STATIC_UNAVAILABLE_TEXT, 1, true);
   }
 }
@@ -671,7 +668,6 @@ $("startBtn").onclick = async () => {
     if (id !== runId) return;           // 載入模型時已經按了停止
     // 只有 WASM 的手機每秒僅約 4 幀（報告實驗四），運算要留給碰撞偵測
     if (C.DEPTH_ENABLED && !depth && (yolo.backend !== "wasm" || C.DEPTH_ON_WASM)) { depth = new DepthWorker(); depth.start(); }
-    if (yolo.backend === "wasm" && !C.DEPTH_ON_WASM) $("notice").textContent = "這支手機不偵測頭部高度障礙、地面高低差與斑馬線，只提醒行人、車輛、紅綠燈與路上的障礙物。";
     detector = detector || new HazardDetector(yolo, depth);
     detector.reset();
     engine = new AlertEngine();
